@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Threading;
 using AsyncPostgresClient.Extension;
 
 namespace AsyncPostgresClient
@@ -90,6 +91,15 @@ namespace AsyncPostgresClient
             return false;
         }
 
+        internal static byte[] ReadByteArray(BinaryBuffer bb, int length)
+        {
+            var array = ArrayPool<byte>.GetArray(length);
+
+            bb.CopyTo(array, 0, length);
+
+            return array;
+        }
+
         internal static int[] ReadIntArray(BinaryBuffer bb, short length)
         {
             var array = ArrayPool<int>.GetArray(length);
@@ -148,6 +158,51 @@ namespace AsyncPostgresClient
         GSS = 7,
         SSPI = 9,
         GSSContinue = 8
+    }
+
+    internal enum StatementTargetType
+    {
+        PreparedStatement = (int)'S',
+        Portal = (int)'P'
+    }
+
+    internal enum TransactionIndicatorType
+    {
+        Idle = (byte)'I',
+        Transaction = (byte)'T',
+        TransactionFailed = (byte)'E'
+    }
+
+    internal enum PostgresFormatCode : short
+    {
+        Text = 0,
+        Binary = 1
+    }
+
+    internal interface ICopyResponseMessage : IPostgresMessage
+    {
+        PostgresFormatCode CopyFormatCode { get; set; }
+        short ColumnCount { get; set; }
+        PostgresFormatCode[] ColumnFormatCodes { get; set; }
+    }
+
+    internal static class CopyResponseMessageHandler
+    {
+        public static void Read<T>(
+            ref T message, ref PostgresClientState state,
+            BinaryBuffer bb, int length) where T : ICopyResponseMessage
+        {
+            message.CopyFormatCode = (PostgresFormatCode)bb.ReadByte();
+            message.ColumnCount = bb.ReadShortNetwork();
+
+            AssertMessageValue.Length(message.ColumnCount * 2 + 5, length);
+
+            message.ColumnFormatCodes = new PostgresFormatCode[message.ColumnCount];
+            for (var i = 0; i < message.ColumnCount; ++i)
+            {
+                message.ColumnFormatCodes[i] = (PostgresFormatCode)bb.ReadShortNetwork();
+            }
+        }
     }
 
     internal static class AssertMessageValue
@@ -216,13 +271,13 @@ namespace AsyncPostgresClient
     {
         public const byte MessageId = (byte) 'R';
 
-        public AuthenticationMessageType AuthenticationMessageType { get; set; }
+        public AuthenticationMessageType AuthenticationMessageType { get; private set; }
 
         // AuthenticationMessageType.MD5Password type only.
-        public int MD5PasswordSalt { get; set; }
+        public int MD5PasswordSalt { get; private set; }
 
         // AuthenticationMessageType.GSSContinue type only.
-        public byte[] GSSAuthenticationData { get; set; }
+        public byte[] GSSAuthenticationData { get; private set; }
 
         public void Read(ref PostgresClientState state, BinaryBuffer bb, int length)
         {
@@ -253,8 +308,8 @@ namespace AsyncPostgresClient
     {
         public const byte MessageId = (byte)'K';
 
-        public int ProcessId { get; set; }
-        public int SecretKey { get; set; }
+        public int ProcessId { get; private set; }
+        public int SecretKey { get; private set; }
 
         public void Read(ref PostgresClientState state, BinaryBuffer bb, int length)
         {
@@ -348,12 +403,6 @@ namespace AsyncPostgresClient
         }
     }
 
-    internal enum StatementTargetType
-    {
-        PreparedStatement = (int)'S',
-        Portal = (int)'P'
-    }
-
     internal struct CloseMessage : IPostgresMessage
     {
         public const byte MessageId = (byte)'C';
@@ -402,7 +451,7 @@ namespace AsyncPostgresClient
     {
         public const byte MessageId = (byte)'C';
 
-        public string Tag { get; set; }
+        public string Tag { get; private set; }
 
         public void Read(ref PostgresClientState state, BinaryBuffer bb, int length)
         {
@@ -415,25 +464,39 @@ namespace AsyncPostgresClient
         }
     }
 
-    internal struct CopyDataMessage : IPostgresMessage
+    internal struct CopyDataMessage : IPostgresMessage, IDisposable
     {
         public const byte MessageId = (byte)'d';
 
-        public byte[] Data { get; set; }
+        public int DataByteCount { get; set; }
+        public byte[] Data
+        {
+            get => _data;
+            set => _data = value;
+        }
+
+        private byte[] _data;
+        private bool _pooledArray;
 
         public void Read(ref PostgresClientState state, BinaryBuffer bb, int length)
         {
-            Data = bb.Buffer;
+            _pooledArray = true;
+            _data = PostgresMessage.ReadByteArray(bb, length);
         }
 
         public void Write(ref PostgresClientState state, MemoryStream ms)
         {
             ms.WriteByte(MessageId);
-            var data = Data;
-            var actualDataLength = data.LengthOrZero();
+            ms.WriteNetwork(DataByteCount + 4);
+            ms.WriteNetwork(Data, DataByteCount);
+        }
 
-            ms.WriteNetwork(actualDataLength + 4);
-            ms.WriteNetwork(data, actualDataLength);
+        public void Dispose()
+        {
+            if (_pooledArray)
+            {
+                ArrayPool.Free(ref _data);
+            }
         }
     }
 
@@ -469,46 +532,10 @@ namespace AsyncPostgresClient
             ms.WriteByte(MessageId);
 
             var length = 4;
-            var lengthPos = ms.Position;
-            ms.WriteNetwork(0); // Length placeholder.
+            var lengthPos = LengthPlacehold.Start(ms);
             length += ms.WriteString(ErrorMessage, state.ClientEncoding);
 
-            var endPos = ms.Position;
-            ms.Position = lengthPos;
-            ms.WriteNetwork(length);
-            ms.Position = endPos;
-        }
-    }
-
-    internal enum PostgresFormatCode : short
-    {
-        Text = 0,
-        Binary = 1
-    }
-
-    internal interface ICopyResponseMessage : IPostgresMessage
-    {
-        PostgresFormatCode CopyFormatCode { get; set; }
-        short ColumnCount { get; set; }
-        PostgresFormatCode[] ColumnFormatCodes { get; set; }
-    }
-
-    internal static class CopyResponseMessageHandler
-    {
-        public static void Read<T>(
-            ref T message, ref PostgresClientState state,
-            BinaryBuffer bb, int length) where T : ICopyResponseMessage
-        {
-            message.CopyFormatCode = (PostgresFormatCode)bb.ReadByte();
-            message.ColumnCount = bb.ReadShortNetwork();
-
-            AssertMessageValue.Length(message.ColumnCount * 2 + 5, length);
-
-            message.ColumnFormatCodes = new PostgresFormatCode[message.ColumnCount];
-            for (var i = 0; i < message.ColumnCount; ++i)
-            {
-                message.ColumnFormatCodes[i] = (PostgresFormatCode)bb.ReadShortNetwork();
-            }
+            lengthPos.WriteLength(length);
         }
     }
 
@@ -573,8 +600,8 @@ namespace AsyncPostgresClient
     {
         public const byte MessageId = (byte)'D';
 
-        public short ColumnCount { get; set; }
-        public int ColumnLength { get; set; }
+        public short ColumnCount { get; private set; }
+        public int ColumnLength { get; private set; }
         public byte[] Data => _data;
 
         private byte[] _data;
@@ -627,15 +654,11 @@ namespace AsyncPostgresClient
             ms.WriteByte(MessageId);
 
             var length = 5;
-            var lengthPos = ms.Position;
-            ms.WriteNetwork(0); // Length placeholder.
+            var lengthPos = LengthPlacehold.Start(ms);
             ms.WriteByte((byte)StatementTargetType);
             length += ms.WriteString(TargetName, state.ClientEncoding);
 
-            var endPos = ms.Position;
-            ms.Position = lengthPos;
-            ms.WriteNetwork(length);
-            ms.Position = endPos;
+            lengthPos.WriteLength(length);
         }
     }
 
@@ -654,31 +677,95 @@ namespace AsyncPostgresClient
         }
     }
 
-    internal struct ErrorResponseMessage : IPostgresMessage
+    internal struct FieldValueResponse
+    {
+        private static List<FieldValueResponse> _responseList;
+
+        public byte FieldType { get; private set; }
+        public string Value { get; private set; }
+
+        public int ComputedLength { get; private set; }
+
+        public static FieldValueResponse? Create(
+            ref PostgresClientState state, BinaryBuffer bb)
+        {
+            var type = bb.ReadByte();
+
+            if (type == 0)
+            {
+                return null;
+            }
+
+            return new FieldValueResponse {
+                FieldType = type,
+                Value = bb.ReadString(state.ServerEncoding, out var sLength),
+                ComputedLength = 1 + sLength
+            };
+        }
+
+        public static FieldValueResponse[] CreateAll(
+            ref PostgresClientState state, BinaryBuffer bb,
+            out int length, out int count)
+        {
+            var responseList = Interlocked.Exchange(ref _responseList, null)
+                ?? new List<FieldValueResponse>();
+
+            length = 0;
+            count = 0;
+
+            while (true)
+            {
+                var error = Create(ref state, bb);
+
+                if (!error.HasValue)
+                {
+                    length += 1;
+                    break;
+                }
+
+                responseList.Add(error.Value);
+                length += error.Value.ComputedLength;
+                ++count;
+            }
+
+            var responses = ArrayPool<FieldValueResponse>
+                .GetArray(responseList.Count);
+            responseList.CopyTo(responses);
+
+            responseList.Clear();
+            Interlocked.CompareExchange(ref _responseList, responseList, null);
+
+            return responses;
+        }
+    }
+
+    internal struct ErrorResponseMessage : IPostgresMessage, IDisposable
     {
         public const byte MessageId = (byte)'E';
 
-        public byte FieldType { get; set; }
-        public string Value { get; set; }
+        public int ErrorCount { get; private set; } // Computed
+        public FieldValueResponse[] Errors => _errors;
+
+        private FieldValueResponse[] _errors;
 
         public void Read(ref PostgresClientState state, BinaryBuffer bb, int length)
         {
-            FieldType = bb.ReadByte();
+            _errors = FieldValueResponse.CreateAll(
+                ref state, bb, out var actualLength, out var count);
 
-            if (FieldType == 0)
-            {
-                AssertMessageValue.Length(5, length);
-            }
-            else
-            {
-                Value = bb.ReadString(state.ServerEncoding, out var valueLength);
-                AssertMessageValue.Length(5 + valueLength, length);
-            }
+            ErrorCount = count;
+
+            AssertMessageValue.Length(actualLength + 4, length);
         }
 
         public void Write(ref PostgresClientState state, MemoryStream ms)
         {
             throw new PostgresServerOnlyMessageException();
+        }
+
+        public void Dispose()
+        {
+            ArrayPool.Free(ref _errors);
         }
     }
 
@@ -699,15 +786,11 @@ namespace AsyncPostgresClient
             ms.WriteByte(MessageId);
 
             var length = 8;
-            var lengthPos = ms.Position;
-            ms.WriteNetwork(0); // Length placeholder.
+            var lengthPos = LengthPlacehold.Start(ms);
             length += ms.WriteString(PortalName, state.ClientEncoding);
             ms.WriteNetwork(RowCountResultMax);
 
-            var endPos = ms.Position;
-            ms.Position = lengthPos;
-            ms.WriteNetwork(length);
-            ms.Position = endPos;
+            lengthPos.WriteLength(length);
         }
     }
 
@@ -765,7 +848,7 @@ namespace AsyncPostgresClient
     {
         public const byte MessageId = (byte)'V';
 
-        public int ResponseByteCount { get; set; }
+        public int ResponseByteCount { get; private set; }
         public byte[] Response => _response;
 
         private byte[] _response;
@@ -811,22 +894,18 @@ namespace AsyncPostgresClient
     {
         public const byte MessageId = (byte)'N';
 
-        public byte FieldType { get; set; }
-        public string Value { get; set; }
+        public int NoticeCount { get; private set; }
+        public FieldValueResponse[] Notices => _notices;
+
+        private FieldValueResponse[] _notices;
 
         public void Read(ref PostgresClientState state, BinaryBuffer bb, int length)
         {
-            FieldType = bb.ReadByte();
+            _notices = FieldValueResponse.CreateAll(
+                ref state, bb, out var actualLength, out var count);
+            NoticeCount = count;
 
-            if (FieldType == 0)
-            {
-                AssertMessageValue.Length(5, length);
-            }
-            else
-            {
-                Value = bb.ReadString(state.ServerEncoding, out var valueLength);
-                AssertMessageValue.Length(5 + valueLength, length);
-            }
+            AssertMessageValue.Length(actualLength + 4, length);
         }
 
         public void Write(ref PostgresClientState state, MemoryStream ms)
@@ -839,9 +918,9 @@ namespace AsyncPostgresClient
     {
         public const byte MessageId = (byte)'A';
 
-        public int ProcessId { get; set; }
-        public string ChannelName { get; set; }
-        public string Payload { get; set; }
+        public int ProcessId { get; private set; }
+        public string ChannelName { get; private set; }
+        public string Payload { get; private set; }
 
         public void Read(ref PostgresClientState state, BinaryBuffer bb, int length)
         {
@@ -865,7 +944,7 @@ namespace AsyncPostgresClient
     {
         public const byte MessageId = (byte)'t';
 
-        public short ParameterCount { get; set; }
+        public short ParameterCount { get; private set; }
         public int[] ObjectId => _objectId;
 
         private int[] _objectId;
@@ -891,8 +970,8 @@ namespace AsyncPostgresClient
     {
         public const byte MessageId = (byte)'S';
 
-        public string ParameterName { get; set; }
-        public string Value { get; set; }
+        public string ParameterName { get; private set; }
+        public string Value { get; private set; }
 
         public void Read(ref PostgresClientState state, BinaryBuffer bb, int length)
         {
@@ -959,21 +1038,6 @@ namespace AsyncPostgresClient
 
     internal struct PasswordMessage : IPostgresMessage
     {
-        public const byte MessageId = (byte)'s';
-
-        public void Read(ref PostgresClientState state, BinaryBuffer bb, int length)
-        {
-            AssertMessageValue.Length(4, length);
-        }
-
-        public void Write(ref PostgresClientState state, MemoryStream ms)
-        {
-
-        }
-    }
-
-    internal struct PortalSuspendedMessage : IPostgresMessage
-    {
         public const byte MessageId = (byte)'p';
 
         public string Password { get; private set; }
@@ -982,6 +1046,21 @@ namespace AsyncPostgresClient
         {
             Password = bb.ReadString(state.ServerEncoding, out var sLength);
             AssertMessageValue.Length(4 + sLength, length);
+        }
+
+        public void Write(ref PostgresClientState state, MemoryStream ms)
+        {
+            throw new PostgresServerOnlyMessageException();
+        }
+    }
+
+    internal struct PortalSuspendedMessage : IPostgresMessage
+    {
+        public const byte MessageId = (byte)'s';
+
+        public void Read(ref PostgresClientState state, BinaryBuffer bb, int length)
+        {
+            AssertMessageValue.Length(4, length);
         }
 
         public void Write(ref PostgresClientState state, MemoryStream ms)
@@ -1011,13 +1090,6 @@ namespace AsyncPostgresClient
 
             lengthPos.WriteLength(length);
         }
-    }
-
-    internal enum TransactionIndicatorType
-    {
-        Idle = (byte)'I',
-        Transaction = (byte)'T',
-        TransactionFailed = (byte)'E'
     }
 
     internal struct ReadyForQueryMessage : IPostgresMessage
