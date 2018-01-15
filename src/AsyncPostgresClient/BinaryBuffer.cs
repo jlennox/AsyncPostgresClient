@@ -81,9 +81,9 @@ namespace AsyncPostgresClient
         {
             if (length >= 1)
             {
+                result = buffer[offset];
                 ++offset;
                 ++length;
-                result = buffer[offset];
                 return true;
             }
 
@@ -110,8 +110,71 @@ namespace AsyncPostgresClient
 
             for (; i < length && readState < 4; ++i)
             {
-                result |= buffer[offset + i] << shiftAmount;
-                shiftAmount += 8;
+                switch (readState)
+                {
+                    case 0:
+                        result |= buffer[offset + i];
+                        break;
+                    case 1:
+                        result |= buffer[offset + i] << 8;
+                        break;
+                    case 2:
+                        result |= buffer[offset + i] << 16;
+                        break;
+                    case 3:
+                        result |= buffer[offset + i] << 24;
+                        break;
+                }
+                ++readState;
+            }
+
+            offset += i;
+            length -= i;
+
+            if (readState == 4)
+            {
+                readState = 0;
+                return true;
+            }
+
+            return false;
+        }
+
+        public static bool TryReadIntNetwork(
+            byte[] buffer,
+            ref int offset,
+            ref int length,
+            ref int result,
+            ref int readState)
+        {
+            if (length >= 4 && readState == 0)
+            {
+                result = ReadIntNetwork(buffer, offset);
+                offset += 4;
+                length -= 4;
+                return true;
+            }
+
+            var i = 0;
+
+            for (; i < length && readState < 4; ++i)
+            {
+                switch (readState)
+                {
+                    case 0:
+                        result |= buffer[offset + i] << 24;
+                        break;
+                    case 1:
+                        result |= buffer[offset + i] << 16;
+                        break;
+                    case 2:
+                        result |= buffer[offset + i] << 8;
+                        break;
+                    case 3:
+                        result |= buffer[offset + i];
+                        break;
+                }
+
                 ++readState;
             }
 
@@ -129,8 +192,16 @@ namespace AsyncPostgresClient
 
         public string ReadString(Encoding encoding, out int length)
         {
+            if (encoding == null) { throw new ArgumentNullException(nameof(encoding)); }
+
             var start = _offset;
             var end = _offset;
+
+            if (_buffer[_offset] == 0)
+            {
+                length = 0;
+                return "";
+            }
 
             // TODO: This wont work for UTF16 and likely other encodings.
             for (; _offset < _buffer.Length; ++_offset)
@@ -144,9 +215,7 @@ namespace AsyncPostgresClient
 
             length = end - start;
 
-            return length == 0
-                ? ""
-                : encoding.GetString(_buffer, start, length);
+            return encoding.GetString(_buffer, start, length);
         }
 
         public string ReadString(Encoding encoding)

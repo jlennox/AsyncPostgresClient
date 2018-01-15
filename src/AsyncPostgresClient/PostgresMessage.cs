@@ -11,16 +11,20 @@ namespace AsyncPostgresClient
     // https://www.postgresql.org/docs/9.3/static/protocol-message-formats.html
     internal static class PostgresMessage
     {
-        private static readonly byte[] _emptyData = new byte[0];
-
         public static bool ReadMessage(
             byte[] buffer, ref int offset,
-            ref int length, ref PostgresReadState state)
+            ref int length, ref PostgresReadState state,
+            ref PostgresClientState clientState,
+            // Arg, I hate this struct boxing.
+            out IPostgresMessage message)
         {
+            message = null;
+
             while (length > 0)
             {
                 switch (state.Position)
                 {
+                    case PostgresReadStatePosition.Start:
                     case PostgresReadStatePosition.Type:
                         if (!BinaryBuffer.TryReadByte(
                             buffer, ref offset, ref length,
@@ -32,7 +36,7 @@ namespace AsyncPostgresClient
                         state.Position = PostgresReadStatePosition.Length;
                         break;
                     case PostgresReadStatePosition.Length:
-                        if (!BinaryBuffer.TryReadInt(
+                        if (!BinaryBuffer.TryReadIntNetwork(
                             buffer, ref offset, ref length,
                             ref state.Length, ref state.TryReadState))
                         {
@@ -53,38 +57,114 @@ namespace AsyncPostgresClient
                         }
                         else if (state.Length == 0)
                         {
-                            state.Position = PostgresReadStatePosition.Decode;
-                            state.Data = _emptyData;
+                            state.Data = EmptyArray<byte>.Value;
+                            goto case PostgresReadStatePosition.Decode;
                         }
                         else
                         {
                             state.Position = PostgresReadStatePosition.Data;
-                            state.Data = new byte[state.Length];
+                            state.DataLeft = state.Length - 4;
+                            state.Data = new byte[state.DataLeft];
                         }
 
                         break;
                     case PostgresReadStatePosition.Data:
                         // -4 because Length contains itself.
-                        var dataLeft = state.Length - state.TryReadState - 4;
+                        var dataLeft = state.DataLeft;
                         var dataAvailable = Math.Min(dataLeft, length);
 
                         Buffer.BlockCopy(buffer, offset, state.Data,
-                            state.TryReadState, dataAvailable);
+                            state.Length - state.DataLeft - 4, dataAvailable);
+
+                        length -= dataAvailable;
+                        offset += dataAvailable;
 
                         if (dataLeft == dataAvailable)
                         {
-                            state.Position = PostgresReadStatePosition.Decode;
-                            state.TryReadState = 0;
+                            goto case PostgresReadStatePosition.Decode;
                         }
+
+                        state.DataLeft -= dataAvailable;
 
                         break;
                     case PostgresReadStatePosition.Decode:
                         switch (state.TypeId)
                         {
-                            case (byte)'R':
+                            case AuthenticationMessage.MessageId:
+                                message = new AuthenticationMessage();
                                 break;
+                            case BackendKeyDataMessage.MessageId:
+                                message = new BackendKeyDataMessage();
+                                break;
+                            case BindCompleteMessage.MessageId:
+                                message = new BindCompleteMessage();
+                                break;
+                            case CloseCompleteMessage.MessageId:
+                                message = new CloseCompleteMessage();
+                                break;
+                            case CommandCompleteMessage.MessageId:
+                                message = new CommandCompleteMessage();
+                                break;
+                            case CopyInResponseMessage.MessageId:
+                                message = new CopyInResponseMessage();
+                                break;
+                            case CopyOutResponseMessage.MessageId:
+                                message = new CopyOutResponseMessage();
+                                break;
+                            case CopyBothResponseMessage.MessageId:
+                                message = new CopyBothResponseMessage();
+                                break;
+                            case DataRowMessage.MessageId:
+                                message = new DataRowMessage();
+                                break;
+                            case EmptyQueryResponseMessage.MessageId:
+                                message = new EmptyQueryResponseMessage();
+                                break;
+                            case ErrorResponseMessage.MessageId:
+                                message = new ErrorResponseMessage();
+                                break;
+                            case FunctionCallResponseMessage.MessageId:
+                                message = new FunctionCallResponseMessage();
+                                break;
+                            case NoDataMessage.MessageId:
+                                message = new NoDataMessage();
+                                break;
+                            case NoticeResponseMessage.MessageId:
+                                message = new NoticeResponseMessage();
+                                break;
+                            case NotificationResponseMessage.MessageId:
+                                message = new NotificationResponseMessage();
+                                break;
+                            case ParameterDescriptionMessage.MessageId:
+                                message = new ParameterDescriptionMessage();
+                                break;
+                            case ParameterStatusMessage.MessageId:
+                                message = new ParameterStatusMessage();
+                                break;
+                            case ParseCompleteMessage.MessageId:
+                                message = new ParseCompleteMessage();
+                                break;
+                            case PortalSuspendedMessage.MessageId:
+                                message = new PortalSuspendedMessage();
+                                break;
+                            case ReadyForQueryMessage.MessageId:
+                                message = new ReadyForQueryMessage();
+                                break;
+                            case RowDescriptionMessage.MessageId:
+                                message = new RowDescriptionMessage();
+                                break;
+                            default:
+                                // TODO: Are we supposed to fastforward instead?
+                                throw new PostgresInvalidMessageId(
+                                    state.TypeId);
                         }
-                        break;
+
+                        message.Read(ref clientState,
+                            new BinaryBuffer(state.Data, 0),
+                            state.Length);
+
+                        state.Reset();
+                        return true;
                 }
             }
 
@@ -128,7 +208,7 @@ namespace AsyncPostgresClient
 
     internal enum PostgresReadStatePosition
     {
-        Type, Length, Data, Decode
+        Start, Type, Length, Data, Decode
     }
 
     internal struct PostgresReadState
@@ -138,6 +218,17 @@ namespace AsyncPostgresClient
         public int Length;
         public byte[] Data;
         public int TryReadState;
+        public int DataLeft;
+
+        public void Reset()
+        {
+            Position = PostgresReadStatePosition.Start;
+            TypeId = 0;
+            Length = 0;
+            Data = null;
+            TryReadState = 0;
+            DataLeft = 0;
+        }
     }
 
     interface IPostgresMessage
@@ -253,12 +344,20 @@ namespace AsyncPostgresClient
     {
     }
 
+    public class PostgresInvalidMessageId : Exception
+    {
+        public PostgresInvalidMessageId(byte typeId)
+            : base($"Invalid type id 0x{typeId:X2} ('{(char)typeId}') given by server.")
+        {
+        }
+    }
+
     internal struct PostgresClientState
     {
         public Encoding ClientEncoding;
         public Encoding ServerEncoding;
 
-        public static PostgresClientState Default()
+        public static PostgresClientState CreateDefault()
         {
             return new PostgresClientState {
                 ClientEncoding = Encoding.ASCII,
@@ -267,7 +366,7 @@ namespace AsyncPostgresClient
         }
     }
 
-    internal struct AuthenticationMessage : IPostgresMessage
+    internal struct AuthenticationMessage : IPostgresMessage, IDisposable
     {
         public const byte MessageId = (byte) 'R';
 
@@ -277,7 +376,9 @@ namespace AsyncPostgresClient
         public int MD5PasswordSalt { get; private set; }
 
         // AuthenticationMessageType.GSSContinue type only.
-        public byte[] GSSAuthenticationData { get; private set; }
+        public byte[] GSSAuthenticationData => _gssAuthenticationData;
+
+        private byte[] _gssAuthenticationData;
 
         public void Read(ref PostgresClientState state, BinaryBuffer bb, int length)
         {
@@ -286,14 +387,15 @@ namespace AsyncPostgresClient
             switch (AuthenticationMessageType)
             {
                 case AuthenticationMessageType.MD5Password:
-                    AssertMessageValue.Length(8, length);
+                    AssertMessageValue.Length(12, length);
                     MD5PasswordSalt = bb.ReadIntNetwork();
                     break;
                 case AuthenticationMessageType.GSSContinue:
-                    GSSAuthenticationData = bb.Buffer;
+                    _gssAuthenticationData = PostgresMessage
+                        .ReadByteArray(bb, length - 8);
                     break;
                 default:
-                    AssertMessageValue.Length(4, length);
+                    AssertMessageValue.Length(8, length);
                     break;
             }
         }
@@ -301,6 +403,11 @@ namespace AsyncPostgresClient
         public void Write(ref PostgresClientState state, MemoryStream ms)
         {
             throw new PostgresServerOnlyMessageException();
+        }
+
+        public void Dispose()
+        {
+            ArrayPool.Free(ref _gssAuthenticationData);
         }
     }
 
@@ -539,7 +646,7 @@ namespace AsyncPostgresClient
         }
     }
 
-    internal struct CopyInResponse : ICopyResponseMessage
+    internal struct CopyInResponseMessage : ICopyResponseMessage
     {
         public const byte MessageId = (byte)'G';
 
@@ -558,7 +665,7 @@ namespace AsyncPostgresClient
         }
     }
 
-    internal struct CopyOutResponse : ICopyResponseMessage
+    internal struct CopyOutResponseMessage : ICopyResponseMessage
     {
         public const byte MessageId = (byte)'H';
 
@@ -577,7 +684,7 @@ namespace AsyncPostgresClient
         }
     }
 
-    internal struct CopyBothResponse : ICopyResponseMessage
+    internal struct CopyBothResponseMessage : ICopyResponseMessage
     {
         public const byte MessageId = (byte)'W';
 
@@ -975,7 +1082,7 @@ namespace AsyncPostgresClient
 
         public void Read(ref PostgresClientState state, BinaryBuffer bb, int length)
         {
-            var actualLength = 4;
+            var actualLength = 6; // +2 to account for string nulls.
             int sLength;
 
             ParameterName = bb.ReadString(state.ServerEncoding, out sLength);
