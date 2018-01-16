@@ -1,12 +1,30 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using AsyncPostgresClient;
 
 namespace AsyncPostgresClient.Tests
 {
+    // Tests performed against live captures of Postgres streams captured
+    // using Wireshark.
     [TestClass]
-    public class PostgresMessageTests
+    public class PostgresCapturedStreamTests
     {
         [TestMethod]
+        public void TestBasicStreamDecode()
+        {
+            var test = new PostgresCapturedStream();
+            test.TestBasicStreamDecode();
+        }
+    }
+
+    // These tests can not directly be [TestMethod]'s because test classes
+    // must be marked public, and this would require most of the internal
+    // types in AsyncPostgresClient to require to be public.
+    internal class PostgresCapturedStream : PostgresStreamTest
+    {
+        public PostgresCapturedStream()
+        {
+            TestInitialize();
+        }
+
         public void TestBasicStreamDecode()
         {
             const string s = @"0000000D  52 00 00 00 08 00 00 00  00 53 00 00 00 16 61 70   R....... .S....ap
@@ -32,36 +50,24 @@ namespace AsyncPostgresClient.Tests
     0000014D  00 4b 00 00 00 0c 00 00  4f de 6b c1 66 a2 5a 00   .K...... O.k.f.Z.
     0000015D  00 00 05 49                                        ...I";
 
-            var buffer = WiresharkBuffer.ReadFromString(s);
-            var offset = 0;
-            var length = buffer.Length;
-            var readState = new PostgresReadState();
-            var clientState = PostgresClientState.CreateDefault();
-            bool found;
-            IPostgresMessage message;
+            Buffer = WiresharkBuffer.ReadFromString(s);
+            Length = Buffer.Length;
 
-            found = PostgresMessage.ReadMessage(
-                buffer, ref offset, ref length,
-                ref readState, ref clientState, out message);
-
-            Assert.IsTrue(found);
-            Assert.IsTrue(message is AuthenticationMessage);
-            using (var authMessage = (AuthenticationMessage)message)
-            {
-                Assert.AreEqual(AuthenticationMessageType.Ok, authMessage.AuthenticationMessageType);
-                Assert.AreEqual(0, authMessage.MD5PasswordSalt);
-                Assert.IsNull(authMessage.GSSAuthenticationData);
-            }
-
-            found = PostgresMessage.ReadMessage(
-                buffer, ref offset, ref length,
-                ref readState, ref clientState, out message);
-
-            Assert.IsTrue(found);
-            Assert.IsTrue(message is ParameterStatusMessage);
-            var parameterMessage = (ParameterStatusMessage)message;
-            Assert.AreEqual("application_name", parameterMessage.ParameterName);
-            Assert.AreEqual("", parameterMessage.Value);
+            AssertAuthorizationOk();
+            AssertParameterStatus("application_name", "");
+            AssertParameterStatus("client_encoding", "UTF8");
+            AssertParameterStatus("DateStyle", "ISO, MDY");
+            AssertParameterStatus("integer_datetimes", "on");
+            AssertParameterStatus("IntervalStyle", "postgres");
+            AssertParameterStatus("is_superuser", "off");
+            AssertParameterStatus("server_encoding", "SQL_ASCII");
+            AssertParameterStatus("server_version", "9.5.4");
+            AssertParameterStatus("session_authorization", "helloworlddataapp");
+            AssertParameterStatus("standard_conforming_strings", "on");
+            AssertParameterStatus("TimeZone", "US/Pacific");
+            AssertBackendKeyData(20446, 1807836834);
+            AssertReadyForQuery(TransactionIndicatorType.Idle);
+            AssertReadNeedsMoreData();
         }
     }
 }

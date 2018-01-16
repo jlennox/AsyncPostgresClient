@@ -144,6 +144,9 @@ namespace AsyncPostgresClient
                             case ParseCompleteMessage.MessageId:
                                 message = new ParseCompleteMessage();
                                 break;
+                            case PasswordMessage.MessageId:
+                                message = new PasswordMessage();
+                                break;
                             case PortalSuspendedMessage.MessageId:
                                 message = new PortalSuspendedMessage();
                                 break;
@@ -456,8 +459,7 @@ namespace AsyncPostgresClient
             ms.WriteByte(MessageId);
 
             var length = 4 + 2 + 2 + 4 + 2;
-            var lengthPos = ms.Position;
-            ms.WriteNetwork(0); // Length placeholder.
+            var lengthPos = LengthPlacehold.Start(ms);
             length += ms.WriteString(PortalName, state.ClientEncoding);
             length += ms.WriteString(PreparedStatementName, state.ClientEncoding);
             ms.WriteNetwork(FormatCodeCount);
@@ -468,10 +470,7 @@ namespace AsyncPostgresClient
             ms.WriteNetwork(ResultColumnFormatCodeCount);
             length += ms.WriteNetwork(ResultColumnFormatCodes);
 
-            var endPos = ms.Position;
-            ms.Position = lengthPos;
-            ms.WriteNetwork(length);
-            ms.Position = endPos;
+            lengthPos.WriteLength(length);
         }
     }
 
@@ -527,15 +526,11 @@ namespace AsyncPostgresClient
             ms.WriteByte(MessageId);
 
             var length = 5;
-            var lengthPos = ms.Position;
-            ms.WriteNetwork(0); // Length placeholder.
+            var lengthPos = LengthPlacehold.Start(ms);
             ms.WriteByte((byte)StatementTargetType);
             length += ms.WriteString(TargetName, state.ClientEncoding);
 
-            var endPos = ms.Position;
-            ms.Position = lengthPos;
-            ms.WriteNetwork(length);
-            ms.Position = endPos;
+            lengthPos.WriteLength(length);
         }
     }
 
@@ -937,7 +932,7 @@ namespace AsyncPostgresClient
         public void Write(ref PostgresClientState state, MemoryStream ms)
         {
             ms.WriteByte(MessageId);
-            ms.WriteNetwork(18 + ArgumentFormatCodeCount * 2 + ArgumentByteCount); // Length placeholder.
+            ms.WriteNetwork(18 + ArgumentFormatCodeCount * 2 + ArgumentByteCount);
             ms.WriteNetwork(ObjectId);
             ms.WriteNetwork(ArgumentFormatCodeCount);
             for (var i = 0; i < ArgumentFormatCodeCount; ++i)
@@ -1082,7 +1077,7 @@ namespace AsyncPostgresClient
 
         public void Read(ref PostgresClientState state, BinaryBuffer bb, int length)
         {
-            var actualLength = 6; // +2 to account for string nulls.
+            var actualLength = 4;
             int sLength;
 
             ParameterName = bb.ReadString(state.ServerEncoding, out sLength);

@@ -83,7 +83,7 @@ namespace AsyncPostgresClient
             {
                 result = buffer[offset];
                 ++offset;
-                ++length;
+                --length;
                 return true;
             }
 
@@ -199,9 +199,12 @@ namespace AsyncPostgresClient
 
             if (_buffer[_offset] == 0)
             {
-                length = 0;
+                length = 1;
                 return "";
             }
+
+            // The first byte was checked on the empty string short curcuit.
+            ++_offset;
 
             // TODO: This wont work for UTF16 and likely other encodings.
             for (; _offset < _buffer.Length; ++_offset)
@@ -209,13 +212,16 @@ namespace AsyncPostgresClient
                 if (_buffer[_offset] == 0)
                 {
                     end = _offset;
+                    ++_offset;
                     break;
                 }
             }
 
-            length = end - start;
+            var strLength = end - start;
 
-            return encoding.GetString(_buffer, start, length);
+            length = strLength + 1;
+
+            return encoding.GetString(_buffer, start, strLength);
         }
 
         public string ReadString(Encoding encoding)
