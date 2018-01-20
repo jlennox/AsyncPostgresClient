@@ -55,7 +55,7 @@ namespace AsyncPostgresClient
                                 state.Length.ToString("X4"),
                                 "Invalid message length.");
                         }
-                        else if (state.Length == 0)
+                        else if (state.Length == 4)
                         {
                             state.Data = EmptyArray<byte>.Value;
                             goto case PostgresReadStatePosition.Decode;
@@ -144,9 +144,6 @@ namespace AsyncPostgresClient
                             case ParseCompleteMessage.MessageId:
                                 message = new ParseCompleteMessage();
                                 break;
-                            case PasswordMessage.MessageId:
-                                message = new PasswordMessage();
-                                break;
                             case PortalSuspendedMessage.MessageId:
                                 message = new PortalSuspendedMessage();
                                 break;
@@ -162,9 +159,21 @@ namespace AsyncPostgresClient
                                     state.TypeId);
                         }
 
-                        message.Read(ref clientState,
-                            new BinaryBuffer(state.Data, 0),
-                            state.Length);
+                        try
+                        {
+                            message.Read(ref clientState,
+                                new BinaryBuffer(state.Data, 0),
+                                state.Length);
+                        }
+                        catch
+                        {
+                            if (message is IDisposable disposableMessage)
+                            {
+                                disposableMessage.Dispose();
+                            }
+
+                            throw;
+                        }
 
                         state.Reset();
                         return true;
@@ -311,6 +320,16 @@ namespace AsyncPostgresClient
                     $"Message length of {expected} expected, but was {actual}");
             }
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void Positive(string name, int actual)
+        {
+            if (actual < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    name, actual, "Value must be positive.");
+            }
+        }
     }
 
     internal struct LengthPlacehold
@@ -444,7 +463,7 @@ namespace AsyncPostgresClient
         public short FormatCodeCount { get; set; }
         public short[] FormatCodes { get; set; }
         public short ParameterCount { get; set; }
-        public int ParameterValueLength { get; set; }
+        public int ParameterByteCount { get; set; }
         public byte[] Parameters { get; set; }
         public short ResultColumnFormatCodeCount { get; set; }
         public short[] ResultColumnFormatCodes { get; set; }
@@ -465,8 +484,8 @@ namespace AsyncPostgresClient
             ms.WriteNetwork(FormatCodeCount);
             length += ms.WriteNetwork(FormatCodes);
             ms.WriteNetwork(ParameterCount);
-            ms.WriteNetwork(ParameterValueLength);
-            length += ms.WriteNetwork(Parameters, ParameterValueLength);
+            ms.WriteNetwork(ParameterByteCount);
+            length += ms.WriteNetwork(Parameters, ParameterByteCount);
             ms.WriteNetwork(ResultColumnFormatCodeCount);
             length += ms.WriteNetwork(ResultColumnFormatCodes);
 
@@ -698,34 +717,103 @@ namespace AsyncPostgresClient
         }
     }
 
+    internal struct DataRow : IDisposable
+    {
+        public int Length { get; internal set; }
+        public byte[] Data => _data;
+        public bool IsNull { get; internal set; }
+
+        private byte[] _data;
+        private bool _pooledArray;
+
+        internal DataRow(int length, byte[] data)
+        {
+            Length = length;
+            IsNull = data == null;
+            _data = data;
+            _pooledArray = false;
+        }
+
+        public static DataRow Create(ref BinaryBuffer bb)
+        {
+            var row = new DataRow();
+
+            try
+            {
+                row.Length = bb.ReadIntNetwork();
+
+                switch (row.Length)
+                {
+                    case -1:
+                        row.IsNull = true;
+                        row._data = EmptyArray<byte>.Value;
+                        break;
+                    case 0:
+                        row._data = EmptyArray<byte>.Value;
+                        break;
+                    default:
+                        AssertMessageValue.Positive(
+                            nameof(row.Length), row.Length);
+
+                        row._data = ArrayPool<byte>.GetArray(row.Length);
+                        row._pooledArray = true;
+                        bb.CopyTo(row._data, 0, row.Length);
+                        break;
+                }
+            }
+            catch
+            {
+                row.Dispose();
+                throw;
+            }
+
+            return row;
+        }
+
+        public void Dispose()
+        {
+            if (_pooledArray)
+            {
+                ArrayPool.Free(ref _data);
+            }
+        }
+    }
+
     internal struct DataRowMessage : IPostgresMessage, IDisposable
     {
         public const byte MessageId = (byte)'D';
 
         public short ColumnCount { get; private set; }
-        public int ColumnLength { get; private set; }
-        public byte[] Data => _data;
+        public DataRow[] Rows => _rows;
 
-        private byte[] _data;
+        private DataRow[] _rows;
 
         public void Read(ref PostgresClientState state, BinaryBuffer bb, int length)
         {
             ColumnCount = bb.ReadShortNetwork();
-            ColumnLength = bb.ReadIntNetwork();
 
-            if (ColumnLength == -1)
+            AssertMessageValue.Positive(nameof(ColumnCount), ColumnCount);
+
+            var actualLength = 6;
+
+            if (ColumnCount == 0)
             {
-                AssertMessageValue.Length(10, length);
-
-                _data = EmptyArray<byte>.Value;
+                _rows = EmptyArray<DataRow>.Value;
             }
             else
             {
-                AssertMessageValue.Length(10 + ColumnLength, length);
+                _rows = ArrayPool<DataRow>.GetArray(ColumnCount);
 
-                _data = ArrayPool<byte>.GetArray(ColumnLength);
-                bb.CopyTo(_data, 0, ColumnLength);
+                for (var i = 0; i < ColumnCount; ++i)
+                {
+                    var row = DataRow.Create(ref bb);
+                    _rows[i] = row;
+
+                    actualLength += row.Length + 4;
+                }
             }
+
+            AssertMessageValue.Length(actualLength, length);
         }
 
         public void Write(ref PostgresClientState state, MemoryStream ms)
@@ -735,7 +823,17 @@ namespace AsyncPostgresClient
 
         public void Dispose()
         {
-            ArrayPool.Free(ref _data);
+            var rows = Interlocked.Exchange(ref _rows, null);
+
+            if (rows != null)
+            {
+                for (var i = 0; i < rows.Length; ++i)
+                {
+                    rows[i].Dispose();
+                }
+
+                ArrayPool.Free(ref rows);
+            }
         }
     }
 
@@ -789,7 +887,7 @@ namespace AsyncPostgresClient
         public int ComputedLength { get; private set; }
 
         public static FieldValueResponse? Create(
-            ref PostgresClientState state, BinaryBuffer bb)
+            ref PostgresClientState state, ref BinaryBuffer bb)
         {
             var type = bb.ReadByte();
 
@@ -817,7 +915,7 @@ namespace AsyncPostgresClient
 
             while (true)
             {
-                var error = Create(ref state, bb);
+                var error = Create(ref state, ref bb);
 
                 if (!error.HasValue)
                 {
@@ -1142,17 +1240,22 @@ namespace AsyncPostgresClient
     {
         public const byte MessageId = (byte)'p';
 
-        public string Password { get; private set; }
+        public string Password { get; set; }
 
         public void Read(ref PostgresClientState state, BinaryBuffer bb, int length)
         {
-            Password = bb.ReadString(state.ServerEncoding, out var sLength);
-            AssertMessageValue.Length(4 + sLength, length);
+            throw new PostgresClientOnlyMessageException();
         }
 
         public void Write(ref PostgresClientState state, MemoryStream ms)
         {
-            throw new PostgresServerOnlyMessageException();
+            ms.WriteByte(MessageId);
+
+            var length = 4;
+            var lengthPos = LengthPlacehold.Start(ms);
+            length += ms.WriteString(Password, state.ClientEncoding);
+
+            lengthPos.WriteLength(length);
         }
     }
 
@@ -1215,24 +1318,24 @@ namespace AsyncPostgresClient
 
     internal struct RowDescriptionField
     {
-        public string Name { get; private set; }
-        public int TableObjectId { get; private set; }
-        public short AttributeNumber { get; private set; }
-        public int DataTypeObjectId { get; private set; }
-        public short DataTypeSize { get; private set; }
-        public int TypeModifier { get; private set; }
-        public PostgresFormatCode FormatCode { get; private set; } // short
+        public string Name { get; internal set; }
+        public int TableObjectId { get; internal set; }
+        public short ColumnIndex { get; internal set; }
+        public int DataTypeObjectId { get; internal set; }
+        public short DataTypeSize { get; internal set; }
+        public int TypeModifier { get; internal set; }
+        public PostgresFormatCode FormatCode { get; internal set; } // short
 
         // Computed by us.
         public int ComputedLength { get; private set; }
 
         internal static RowDescriptionField Create(
-            ref PostgresClientState state, BinaryBuffer bb)
+            ref PostgresClientState state, ref BinaryBuffer bb)
         {
             return new RowDescriptionField {
                 Name = bb.ReadString(state.ServerEncoding, out var sLength),
                 TableObjectId = bb.ReadIntNetwork(),
-                AttributeNumber = bb.ReadShortNetwork(),
+                ColumnIndex = bb.ReadShortNetwork(),
                 DataTypeObjectId = bb.ReadIntNetwork(),
                 DataTypeSize = bb.ReadShortNetwork(),
                 TypeModifier = bb.ReadIntNetwork(),
@@ -1258,7 +1361,7 @@ namespace AsyncPostgresClient
             var actualLength = 6;
             for (var i = 0; i < FieldCount; ++i)
             {
-                var field = RowDescriptionField.Create(ref state, bb);
+                var field = RowDescriptionField.Create(ref state, ref bb);
                 _fields[i] = field;
                 actualLength += field.ComputedLength;
             }

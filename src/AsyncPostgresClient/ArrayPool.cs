@@ -15,16 +15,20 @@ namespace AsyncPostgresClient
         }
     }
 
-    internal class ArrayPool<T>
+    internal interface IArrayPool<T>
     {
-        private static readonly T[] _empty = new T[0];
-        private static readonly ArrayPool<T> _default = new ArrayPool<T>();
+        T[] Get(int size);
+        void Free(ref T[] array);
+    }
 
+    // A 'dumb' placeholder to be later replaced.
+    internal class AllocatingArrayPool<T> : IArrayPool<T>
+    {
         public T[] Get(int size)
         {
             if (size == 0)
             {
-                return _empty;
+                return EmptyArray<T>.Value;
             }
 
             return new T[size];
@@ -34,11 +38,17 @@ namespace AsyncPostgresClient
         {
             var exchanged = Interlocked.Exchange(ref array, null);
 
-            if (exchanged == null || exchanged.Length != 0)
+            if (exchanged == null || exchanged.Length == 0)
             {
                 return;
             }
         }
+    }
+
+    internal static class ArrayPool<T>
+    {
+        private static readonly IArrayPool<T> _default =
+            new AllocatingArrayPool<T>();
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static T[] GetArray(int size)

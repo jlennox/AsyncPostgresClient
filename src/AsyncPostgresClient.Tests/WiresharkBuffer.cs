@@ -13,9 +13,23 @@ namespace AsyncPostgresClient.Tests
             // 00000040  73 71 6c 5f 74 65 73 74  73 00 00                  sql_test s..
             const int addressLength = 10;
             const int charsOfHexPerRow = 49;
-            var bytes = new List<byte>();
+            var bytes = new List<byte>(dump.Length / 80);
+            var i = 0;
 
-            for (var i = 0; i < dump.Length;)
+            for (; i < dump.Length; ++i)
+            {
+                switch (dump[i])
+                {
+                    case ' ':
+                    case '\n':
+                    case '\r':
+                        continue;
+                }
+
+                break;
+            }
+
+            for (; i < dump.Length;)
             {
                 // Skip spaces
                 for (; i < dump.Length; ++i)

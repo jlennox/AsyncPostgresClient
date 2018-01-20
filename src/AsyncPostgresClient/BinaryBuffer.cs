@@ -31,7 +31,7 @@ namespace AsyncPostgresClient
         {
             if (buffer == null) { throw new ArgumentNullException(nameof(buffer)); }
             if (offset < 0) { throw new ArgumentOutOfRangeException(nameof(offset), offset, "Value must be positive."); }
-            if (offset >= buffer.Length) { throw new ArgumentException("Index out of range.", nameof(buffer)); }
+            if (offset > buffer.Length) { throw new ArgumentException("Index out of range.", nameof(buffer)); }
 
             _buffer = buffer;
             _offset = offset;
