@@ -5,29 +5,36 @@ namespace AsyncPostgresClient.Tests
     // Tests performed against live captures of Postgres streams captured
     // using Wireshark.
     [TestClass]
-    public class PostgresCapturedStreamTests
+    public class PostgresCapturedStreamWriteTests
     {
         [TestMethod]
         public void TestAuthAndParameters()
         {
-            var test = new PostgresCapturedStream();
+            var test = new PostgresCapturedWriteStream();
             test.TestAuthAndParameters();
         }
 
         [TestMethod]
         public void TestDataResult()
         {
-            var test = new PostgresCapturedStream();
+            var test = new PostgresCapturedWriteStream();
             test.TestDataResult();
+        }
+
+        [TestMethod]
+        public void TestCommandComplete()
+        {
+            var test = new PostgresCapturedWriteStream();
+            test.TestCommandComplete();
         }
     }
 
     // These tests can not directly be [TestMethod]'s because test classes
     // must be marked public, and this would require most of the internal
     // types in AsyncPostgresClient to require to be public.
-    internal class PostgresCapturedStream : PostgresStreamTest
+    internal class PostgresCapturedWriteStream : PostgresStreamTest
     {
-        public PostgresCapturedStream()
+        public PostgresCapturedWriteStream()
         {
             TestInitialize();
         }
@@ -258,6 +265,24 @@ namespace AsyncPostgresClient.Tests
             });
 
             FastForwardDataRow(18);
+            AssertReadNeedsMoreData();
+        }
+
+        public void TestCommandComplete()
+        {
+            const string s = @"
+    00000000  44 00 00 00 46 00 08 00  00 00 0A 70 67 5F 63 61   D...F......pg_ca
+    00000010  74 61 6C 6F 67 00 00 00  0A 5F 69 6E 74 38 72 61   talog...._int8ra
+    00000020  6E 67 65 00 00 00 04 33  39 32 37 00 00 00 01 30   nge....3927....0
+    00000030  00 00 00 01 30 00 00 00  01 61 00 00 00 04 33 39   ....0....a....39
+    00000040  32 36 00 00 00 01 33                              26....3
+";
+
+            SetBufferFromWiresharkString(s);
+
+            FastForwardDataRow(1);
+            AssertCommandComplete("SELECT 143");
+            AssertReadyForQuery(TransactionIndicatorType.Idle);
             AssertReadNeedsMoreData();
         }
     }

@@ -6,6 +6,6 @@ namespace AsyncPostgresClient
 {
     internal static class EmptyArray<T>
     {
-        public static T[] Value = new T[0];
+        public static readonly T[] Value = new T[0];
     }
 }

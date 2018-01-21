@@ -182,6 +182,19 @@ namespace AsyncPostgresClient.Tests
             }
         }
 
+        protected void AssertCommandComplete(string tag)
+        {
+            var found = PostgresMessage.ReadMessage(
+                Buffer, ref Offset, ref Length,
+                ref ReadState, ref ClientState, out var message);
+
+            Assert.IsTrue(found);
+            Assert.IsTrue(message is CommandCompleteMessage);
+            var dataMessage = (CommandCompleteMessage)message;
+
+            Assert.AreEqual(tag, dataMessage.Tag);
+        }
+
         protected void AssertReadNeedsMoreData()
         {
             var found = PostgresMessage.ReadMessage(

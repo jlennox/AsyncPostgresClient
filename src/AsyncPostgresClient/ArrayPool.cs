@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
@@ -60,6 +61,24 @@ namespace AsyncPostgresClient
         public static void FreeArray(ref T[] array)
         {
             _default.Free(ref array);
+        }
+    }
+
+    internal static class MemoryStreamPool
+    {
+        public static MemoryStream Get()
+        {
+            return new MemoryStream();
+        }
+
+        public static void Free(ref MemoryStream ms)
+        {
+            var exchanged = Interlocked.Exchange(ref ms, null);
+
+            if (exchanged == null)
+            {
+                return;
+            }
         }
     }
 }

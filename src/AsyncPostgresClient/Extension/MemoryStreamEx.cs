@@ -2,6 +2,8 @@
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace AsyncPostgresClient.Extension
 {
@@ -150,6 +152,24 @@ namespace AsyncPostgresClient.Extension
 
             ms.WriteByte(0);
             return totalBytes + 1;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Task CopyToAsync(
+            this MemoryStream ms, bool async,
+            Stream stream, CancellationToken cancel)
+        {
+            // The .net code shouldn't be allocating anything regardless
+            // becuase it uses the internal byte buffer for the memorystream.
+            const int bufferSize = 8 * 1024;
+
+            if (!async)
+            {
+                ms.CopyTo(stream, bufferSize);
+                return Task.CompletedTask;
+            }
+
+            return ms.CopyToAsync(stream, bufferSize, cancel);
         }
     }
 }

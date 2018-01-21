@@ -491,6 +491,34 @@ namespace AsyncPostgresClient
 
             lengthPos.WriteLength(length);
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void WriteMessage(
+            string portalName,
+            string preparedStatementName,
+            short formatCodeCount,
+            short[] formatCodes,
+            short parameterCount,
+            int parameterByteCount,
+            byte[] parameters,
+            short resultColumnFormatCodeCount,
+            short[] resultColumnFormatCodes,
+            ref PostgresClientState state, MemoryStream ms)
+        {
+            var message = new BindMessage {
+                PortalName = portalName,
+                PreparedStatementName = preparedStatementName,
+                FormatCodeCount = formatCodeCount,
+                FormatCodes = formatCodes,
+                ParameterCount = parameterCount,
+                ParameterByteCount = parameterByteCount,
+                Parameters = parameters,
+                ResultColumnFormatCodeCount = resultColumnFormatCodeCount,
+                ResultColumnFormatCodes = resultColumnFormatCodes
+            };
+
+            message.Write(ref state, ms);
+        }
     }
 
     internal struct BindCompleteMessage : IPostgresMessage
@@ -526,6 +554,19 @@ namespace AsyncPostgresClient
             ms.WriteNetwork(ProcessId);
             ms.WriteNetwork(SecretKey);
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void WriteMessage(
+            int processId, int secretKey,
+            ref PostgresClientState state, MemoryStream ms)
+        {
+            var message = new CancelRequestMessage {
+                ProcessId = processId,
+                SecretKey = secretKey
+            };
+
+            message.Write(ref state, ms);
+        }
     }
 
     internal struct CloseMessage : IPostgresMessage
@@ -550,6 +591,19 @@ namespace AsyncPostgresClient
             length += ms.WriteString(TargetName, state.ClientEncoding);
 
             lengthPos.WriteLength(length);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void WriteMessage(
+            StatementTargetType statementTargetType, string targetName,
+            ref PostgresClientState state, MemoryStream ms)
+        {
+            var message = new CloseMessage {
+                StatementTargetType = statementTargetType,
+                TargetName = targetName
+            };
+
+            message.Write(ref state, ms);
         }
     }
 
@@ -612,6 +666,20 @@ namespace AsyncPostgresClient
             ms.WriteNetwork(Data, DataByteCount);
         }
 
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void WriteMessage(
+            int dataByteCount, byte[] data,
+            ref PostgresClientState state, MemoryStream ms)
+        {
+            var message = new CopyDataMessage {
+                DataByteCount = dataByteCount,
+                Data = data
+            };
+
+            message.Write(ref state, ms);
+        }
+
         public void Dispose()
         {
             if (_pooledArray)
@@ -635,6 +703,15 @@ namespace AsyncPostgresClient
             ms.WriteByte(MessageId);
             ms.WriteNetwork(4);
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void WriteMessage(
+            ref PostgresClientState state, MemoryStream ms)
+        {
+            var message = new CopyDoneMessage();
+
+            message.Write(ref state, ms);
+        }
     }
 
     internal struct CopyFailMessage : IPostgresMessage
@@ -657,6 +734,18 @@ namespace AsyncPostgresClient
             length += ms.WriteString(ErrorMessage, state.ClientEncoding);
 
             lengthPos.WriteLength(length);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void WriteMessage(
+            string errorMessage,
+            ref PostgresClientState state, MemoryStream ms)
+        {
+            var message = new CopyFailMessage {
+                ErrorMessage = errorMessage
+            };
+
+            message.Write(ref state, ms);
         }
     }
 
@@ -860,6 +949,19 @@ namespace AsyncPostgresClient
 
             lengthPos.WriteLength(length);
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void WriteMessage(
+            StatementTargetType statementTargetType, string targetName,
+            ref PostgresClientState state, MemoryStream ms)
+        {
+            var message = new DescribeMessage {
+                StatementTargetType = statementTargetType,
+                TargetName = targetName
+            };
+
+            message.Write(ref state, ms);
+        }
     }
 
     internal struct EmptyQueryResponseMessage : IPostgresMessage
@@ -992,6 +1094,19 @@ namespace AsyncPostgresClient
 
             lengthPos.WriteLength(length);
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void WriteMessage(
+            string portalName, int rowCountResultMax,
+            ref PostgresClientState state, MemoryStream ms)
+        {
+            var message = new ExecuteMessage {
+                PortalName = portalName,
+                RowCountResultMax = rowCountResultMax
+            };
+
+            message.Write(ref state, ms);
+        }
     }
 
     internal struct FlushMessage : IPostgresMessage
@@ -1007,6 +1122,15 @@ namespace AsyncPostgresClient
         {
             ms.WriteByte(MessageId);
             ms.WriteNetwork(4);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void WriteMessage(
+            ref PostgresClientState state, MemoryStream ms)
+        {
+            var message = new FlushMessage();
+
+            message.Write(ref state, ms);
         }
     }
 
@@ -1041,6 +1165,30 @@ namespace AsyncPostgresClient
             ms.WriteNetwork(ArgumentByteCount);
             ms.WriteNetwork(ArgumentData, ArgumentByteCount);
             ms.WriteNetwork((short)ResultFormatCode);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void WriteMessage(
+            int objectId,
+            short argumentFormatCodeCount,
+            PostgresFormatCode[] argumentFormatCodes,
+            short argumentCount,
+            int argumentByteCount,
+            byte[] argumentData,
+            PostgresFormatCode resultFormatCode,
+            ref PostgresClientState state, MemoryStream ms)
+        {
+            var message = new FunctionCallMessage {
+                ObjectId = objectId,
+                ArgumentFormatCodeCount = argumentFormatCodeCount,
+                ArgumentFormatCodes = argumentFormatCodes,
+                ArgumentCount = argumentCount,
+                ArgumentByteCount= argumentByteCount,
+                ArgumentData = argumentData,
+                ResultFormatCode = resultFormatCode
+            };
+
+            message.Write(ref state, ms);
         }
     }
 
@@ -1219,6 +1367,24 @@ namespace AsyncPostgresClient
 
             lengthPos.WriteLength(length);
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void WriteMessage(
+            string destinationName,
+            string query,
+            short parameterTypeCount,
+            int[] objectId,
+            ref PostgresClientState state, MemoryStream ms)
+        {
+            var message = new ParseMessage {
+                DestinationName = destinationName,
+                Query = query,
+                ParameterTypeCount = parameterTypeCount,
+                ObjectId = objectId,
+            };
+
+            message.Write(ref state, ms);
+        }
     }
 
     internal struct ParseCompleteMessage : IPostgresMessage
@@ -1257,6 +1423,18 @@ namespace AsyncPostgresClient
 
             lengthPos.WriteLength(length);
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void WriteMessage(
+            string passage,
+            ref PostgresClientState state, MemoryStream ms)
+        {
+            var message = new PasswordMessage {
+                Password = passage
+            };
+
+            message.Write(ref state, ms);
+        }
     }
 
     internal struct PortalSuspendedMessage : IPostgresMessage
@@ -1294,6 +1472,19 @@ namespace AsyncPostgresClient
             length += ms.WriteString(Query, state.ClientEncoding);
 
             lengthPos.WriteLength(length);
+        }
+
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void WriteMessage(
+            string query,
+            ref PostgresClientState state, MemoryStream ms)
+        {
+            var message = new QueryMessage {
+                Query = query
+            };
+
+            message.Write(ref state, ms);
         }
     }
 
@@ -1393,10 +1584,20 @@ namespace AsyncPostgresClient
             ms.WriteNetwork(8);
             ms.WriteNetwork((int)80877103);
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void WriteMessage(
+            ref PostgresClientState state, MemoryStream ms)
+        {
+            var message = new SSLRequestMessage();
+
+            message.Write(ref state, ms);
+        }
     }
 
     internal struct StartupMessage : IPostgresMessage
     {
+        public int MessageCount { get; set; }
         public KeyValuePair<string, string>[] Messages { get; set; }
 
         public void Read(ref PostgresClientState state, BinaryBuffer bb, int length)
@@ -1414,7 +1615,7 @@ namespace AsyncPostgresClient
 
             if (messages != null)
             {
-                for (var i = 0; i < messages.Length; ++i)
+                for (var i = 0; i < MessageCount; ++i)
                 {
                     var message = messages[i];
 
@@ -1424,6 +1625,19 @@ namespace AsyncPostgresClient
             }
 
             ms.WriteByte(0);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void WriteMessage(
+            ref PostgresClientState state, MemoryStream ms,
+            int messageCount, KeyValuePair<string, string>[] messages)
+        {
+            var message = new StartupMessage {
+                MessageCount = messageCount,
+                Messages = messages
+            };
+
+            message.Write(ref state, ms);
         }
     }
 
@@ -1441,6 +1655,15 @@ namespace AsyncPostgresClient
             ms.WriteByte(MessageId);
             ms.WriteNetwork(4);
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void WriteMessage(
+            ref PostgresClientState state, MemoryStream ms)
+        {
+            var message = new SyncMessage();
+
+            message.Write(ref state, ms);
+        }
     }
 
     internal struct TerminateMessage : IPostgresMessage
@@ -1456,6 +1679,15 @@ namespace AsyncPostgresClient
         {
             ms.WriteByte(MessageId);
             ms.WriteNetwork(4);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void WriteMessage(
+            ref PostgresClientState state, MemoryStream ms)
+        {
+            var message = new TerminateMessage();
+
+            message.Write(ref state, ms);
         }
     }
 }
