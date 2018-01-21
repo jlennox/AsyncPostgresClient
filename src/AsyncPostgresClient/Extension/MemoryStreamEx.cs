@@ -130,7 +130,8 @@ namespace AsyncPostgresClient.Extension
                 return byteCount + 1;
             }
 
-            // This allocation is not pretty. Consider caching and flushing.
+            // TODO: This allocation is not pretty. Consider caching and
+            // flushing.
             var encoder = encoding.GetEncoder();
             var charIndex = 0;
             var completed = false;

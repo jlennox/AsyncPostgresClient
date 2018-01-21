@@ -26,7 +26,7 @@ namespace AsyncPostgresClient.Extension
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Task<int> ReadAsync(
+        public static ValueTask<int> ReadAsync(
             this Stream stream, bool async,
             byte[] buffer, int offset, int count,
             CancellationToken cancellationToken)
@@ -34,10 +34,13 @@ namespace AsyncPostgresClient.Extension
             if (!async)
             {
                 var nread = stream.Read(buffer, offset, count);
-                return new ValueTask<int>(nread).AsTask();
+                return new ValueTask<int>(nread);
             }
 
-            return stream.ReadAsync(buffer, offset, count, cancellationToken);
+            var readTask = stream.ReadAsync(
+                buffer, offset, count, cancellationToken);
+
+            return new ValueTask<int>(readTask);
         }
     }
 }

@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace AsyncPostgresClient
 {
-    public class PostgresDbCommand : DbCommand
+    public class PostgresCommand : DbCommand
     {
         public override string CommandText { get; set; }
         public override int CommandTimeout { get; set; }
@@ -16,6 +16,15 @@ namespace AsyncPostgresClient
         protected override DbParameterCollection DbParameterCollection { get; }
         protected override DbTransaction DbTransaction { get; set; }
         public override bool DesignTimeVisible { get; set; }
+
+        private readonly string _command;
+        private readonly PostgresDbConnection _connection;
+
+        public PostgresCommand(string command, PostgresDbConnection connection)
+        {
+            _command = command;
+            _connection = connection;
+        }
 
         public override void Cancel()
         {
@@ -42,6 +51,13 @@ namespace AsyncPostgresClient
             throw new NotImplementedException();
         }
 
+        public override async Task<object> ExecuteScalarAsync(
+            CancellationToken cancellationToken)
+        {
+            await _connection.Query(true, _command, cancellationToken);
+            return 0;
+        }
+
         protected override DbDataReader ExecuteDbDataReader(
             CommandBehavior behavior)
         {
@@ -52,8 +68,19 @@ namespace AsyncPostgresClient
             CommandBehavior behavior,
             CancellationToken cancellationToken)
         {
-            return new ValueTask<DbDataReader>(
-                new PostgresDbDataReader(behavior, cancellationToken)).AsTask();
+            var reader = new PostgresDbDataReader(behavior, cancellationToken);
+
+            return Task.FromResult<DbDataReader>(reader);
+        }
+
+        public override Task<int> ExecuteNonQueryAsync(CancellationToken cancellationToken)
+        {
+            throw new NotImplementedException();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
         }
     }
 }

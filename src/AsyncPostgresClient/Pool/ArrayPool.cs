@@ -48,8 +48,12 @@ namespace AsyncPostgresClient
 
     internal static class ArrayPool<T>
     {
-        private static readonly IArrayPool<T> _default =
-            new AllocatingArrayPool<T>();
+        private static readonly IArrayPool<T> _default = InstanceDefault();
+
+        public static IArrayPool<T> InstanceDefault()
+        {
+            return new AllocatingArrayPool<T>();
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static T[] GetArray(int size)
@@ -79,6 +83,29 @@ namespace AsyncPostgresClient
             {
                 return;
             }
+
+            exchanged.Position = 0;
+            exchanged.SetLength(0);
+        }
+    }
+
+    internal static class StringBuilderPool
+    {
+        public static StringBuilder Get()
+        {
+            return new StringBuilder();
+        }
+
+        public static void Free(ref StringBuilder sb)
+        {
+            var exchanged = Interlocked.Exchange(ref sb, null);
+
+            if (exchanged == null)
+            {
+                return;
+            }
+
+            exchanged.Clear();
         }
     }
 }

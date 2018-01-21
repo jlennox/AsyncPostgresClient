@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using AsyncPostgresClient.Extension;
@@ -352,7 +353,7 @@ namespace AsyncPostgresClient
         public void WriteLength(int length)
         {
             var endPos = _ms.Position;
-            _ms.Position = _lengthPos;
+            _ms.Position = _lengthPos - 4;
             _ms.WriteNetwork(length);
             _ms.Position = endPos;
         }
@@ -395,25 +396,26 @@ namespace AsyncPostgresClient
         public AuthenticationMessageType AuthenticationMessageType { get; private set; }
 
         // AuthenticationMessageType.MD5Password type only.
-        public int MD5PasswordSalt { get; private set; }
+        public byte[] MD5PasswordSalt => _dataBuffer;
 
         // AuthenticationMessageType.GSSContinue type only.
-        public byte[] GSSAuthenticationData => _gssAuthenticationData;
+        public byte[] GSSAuthenticationData => _dataBuffer;
 
-        private byte[] _gssAuthenticationData;
+        private byte[] _dataBuffer;
 
         public void Read(ref PostgresClientState state, BinaryBuffer bb, int length)
         {
-            AuthenticationMessageType = (AuthenticationMessageType)bb.ReadByte();
+            AuthenticationMessageType = (AuthenticationMessageType)bb
+                .ReadIntNetwork();
 
             switch (AuthenticationMessageType)
             {
                 case AuthenticationMessageType.MD5Password:
                     AssertMessageValue.Length(12, length);
-                    MD5PasswordSalt = bb.ReadIntNetwork();
+                    _dataBuffer = PostgresMessage.ReadByteArray(bb, 4);
                     break;
                 case AuthenticationMessageType.GSSContinue:
-                    _gssAuthenticationData = PostgresMessage
+                    _dataBuffer = PostgresMessage
                         .ReadByteArray(bb, length - 8);
                     break;
                 default:
@@ -429,7 +431,7 @@ namespace AsyncPostgresClient
 
         public void Dispose()
         {
-            ArrayPool.Free(ref _gssAuthenticationData);
+            ArrayPool.Free(ref _dataBuffer);
         }
     }
 
@@ -1402,11 +1404,26 @@ namespace AsyncPostgresClient
         }
     }
 
-    internal struct PasswordMessage : IPostgresMessage
+    internal struct PasswordMessage : IPostgresMessage, IDisposable
     {
         public const byte MessageId = (byte)'p';
 
-        public string Password { get; set; }
+        public int PasswordLength { get; set; }
+        public byte[] Password
+        {
+            get => _password;
+            set => _password = value;
+        }
+
+        private byte[] _password;
+        private readonly bool _pooledArray;
+
+        public PasswordMessage(bool pooledArray)
+        {
+            PasswordLength = 0;
+            _password = null;
+            _pooledArray = pooledArray;
+        }
 
         public void Read(ref PostgresClientState state, BinaryBuffer bb, int length)
         {
@@ -1415,25 +1432,95 @@ namespace AsyncPostgresClient
 
         public void Write(ref PostgresClientState state, MemoryStream ms)
         {
+            Argument.HasValue(nameof(Password), Password);
+
             ms.WriteByte(MessageId);
-
-            var length = 4;
-            var lengthPos = LengthPlacehold.Start(ms);
-            length += ms.WriteString(Password, state.ClientEncoding);
-
-            lengthPos.WriteLength(length);
+            ms.WriteNetwork(2 + PasswordLength);
+            ms.Write(Password, 0, PasswordLength);
+            ms.WriteByte(0);
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void WriteMessage(
-            string passage,
-            ref PostgresClientState state, MemoryStream ms)
+        public void Dispose()
         {
-            var message = new PasswordMessage {
-                Password = passage
-            };
+            if (_pooledArray)
+            {
+                ArrayPool.Free(ref _password);
+            }
+        }
 
-            message.Write(ref state, ms);
+        public static PasswordMessage CreateMd5(
+            AuthenticationMessage authenticationMessage,
+            PostgresClientState state,
+            PostgresConnectionString connectionString)
+        {
+            // http://kn0.ninja/blog/postgresql-pass-the-hashed-hash/
+            // MD5(MD5(P + username) + connection-salt))
+
+            Argument.HasValue(
+                nameof(authenticationMessage.MD5PasswordSalt),
+                authenticationMessage.MD5PasswordSalt);
+
+            var passwordMessage = new PasswordMessage();
+            MD5 md5 = null;
+            byte[] buffer = null;
+            var encoding = state.ClientEncoding;
+            var username = connectionString.Username;
+            var password = connectionString.Password;
+            var salt = authenticationMessage.MD5PasswordSalt;
+
+            try
+            {
+                md5 = MD5.Create();
+                var characterCount = username.Length + password.Length;
+                var maxByteCount = encoding.GetMaxByteCount(characterCount);
+                buffer = ArrayPool<byte>.GetArray(maxByteCount);
+                var actualByteCount = encoding.GetBytes(
+                    username, 0, username.Length, buffer, 0);
+                actualByteCount = +encoding.GetBytes(
+                    password, 0, password.Length, buffer, actualByteCount);
+
+                var unsaltedHash = md5.ComputeHash(buffer, 0, actualByteCount);
+                var unsaltedHashAsciiLength = unsaltedHash.Length * 2;
+                var saltedHashLength = unsaltedHashAsciiLength + 4;
+
+                ArrayPool.Free(ref buffer);
+                buffer = ArrayPool<byte>.GetArray(saltedHashLength);
+
+                HexEncoding.WriteAscii(
+                    buffer, 0, buffer.Length,
+                    unsaltedHash, 0, unsaltedHash.Length);
+
+                salt.CopyTo(buffer, unsaltedHashAsciiLength);
+
+                var saltedHash = md5.ComputeHash(buffer, 0, saltedHashLength);
+                var passwordLength = saltedHash.Length * 2 + 3;
+
+                ArrayPool.Free(ref buffer);
+                buffer = ArrayPool<byte>.GetArray(passwordLength);
+
+                buffer[0] = (byte)'m';
+                buffer[1] = (byte)'d';
+                buffer[2] = (byte)'5';
+
+                HexEncoding.WriteAscii(
+                    buffer, 3, buffer.Length - 3,
+                    saltedHash, 0, saltedHash.Length);
+
+                passwordMessage.Password = buffer;
+                passwordMessage.PasswordLength = passwordLength;
+            }
+            catch
+            {
+                // Only free in case of exception. In the non-exceptional case
+                // this will be free'ed when PasswordMessage is disposed.
+                ArrayPool.Free(ref buffer);
+            }
+            finally
+            {
+                md5.TryDispose();
+            }
+
+            return passwordMessage;
         }
     }
 
@@ -1608,8 +1695,11 @@ namespace AsyncPostgresClient
         public void Write(ref PostgresClientState state, MemoryStream ms)
         {
             // No message id sent.
-            ms.WriteNetwork(8);
-            ms.WriteNetwork((int)196608);
+            var length = 9;
+            var lengthPos = LengthPlacehold.Start(ms);
+
+            // Protocol version 3.0
+            ms.WriteNetwork((int)0x0003_0000);
 
             var messages = Messages;
 
@@ -1619,12 +1709,17 @@ namespace AsyncPostgresClient
                 {
                     var message = messages[i];
 
-                    ms.WriteString(message.Key, state.ClientEncoding);
-                    ms.WriteString(message.Value, state.ClientEncoding);
+                    length += ms.WriteString(
+                        message.Key, state.ClientEncoding);
+
+                    length += ms.WriteString(
+                        message.Value, state.ClientEncoding);
                 }
             }
 
             ms.WriteByte(0);
+
+            lengthPos.WriteLength(length);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
