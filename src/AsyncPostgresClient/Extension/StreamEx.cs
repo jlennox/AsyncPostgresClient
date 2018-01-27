@@ -1,12 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
+﻿using System.IO;
 using System.Runtime.CompilerServices;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace AsyncPostgresClient.Extension
+namespace Lennox.AsyncPostgresClient.Extension
 {
     internal static class StreamEx
     {

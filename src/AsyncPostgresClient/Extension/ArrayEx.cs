@@ -1,9 +1,6 @@
-﻿using System;
-using System.IO;
-using System.Runtime.CompilerServices;
-using System.Text;
+﻿using System.Runtime.CompilerServices;
 
-namespace AsyncPostgresClient.Extension
+namespace Lennox.AsyncPostgresClient.Extension
 {
     internal static class ArrayEx
     {

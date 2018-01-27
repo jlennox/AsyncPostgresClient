@@ -1,10 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Text;
+﻿using System.IO;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
-namespace AsyncPostgresClient.Tests
+namespace Lennox.AsyncPostgresClient.Tests
 {
     [TestClass]
     public class PostgresCapturedStreamReadTests

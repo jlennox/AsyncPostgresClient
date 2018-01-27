@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 
-namespace AsyncPostgresClient
+namespace Lennox.AsyncPostgresClient
 {
     // TODO: Read the spec and implement an actual parser.
     internal class PostgresConnectionString

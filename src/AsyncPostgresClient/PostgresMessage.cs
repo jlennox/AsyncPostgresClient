@@ -5,9 +5,10 @@ using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
-using AsyncPostgresClient.Extension;
+using Lennox.AsyncPostgresClient.Extension;
+using Lennox.AsyncPostgresClient.Pool;
 
-namespace AsyncPostgresClient
+namespace Lennox.AsyncPostgresClient
 {
     // https://www.postgresql.org/docs/9.3/static/protocol-message-formats.html
     internal static class PostgresMessage

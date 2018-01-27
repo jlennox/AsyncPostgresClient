@@ -1,12 +1,11 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
+﻿using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 
-namespace AsyncPostgresClient
+namespace Lennox.AsyncPostgresClient.Pool
 {
+    // https://github.com/dotnet/coreclr/tree/master/src/mscorlib/shared/System/Buffers
     internal static class ArrayPool
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -89,6 +88,7 @@ namespace AsyncPostgresClient
         }
     }
 
+    // https://referencesource.microsoft.com/#mscorlib/system/text/stringbuildercache.cs,a6dbe82674916ac0
     internal static class StringBuilderPool
     {
         public static StringBuilder Get()

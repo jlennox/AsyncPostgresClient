@@ -1,7 +1,7 @@
 ﻿using System;
-using System.Text;
+using Lennox.AsyncPostgresClient.Pool;
 
-namespace AsyncPostgresClient
+namespace Lennox.AsyncPostgresClient
 {
     public class PostgresErrorException : Exception
     {

@@ -4,7 +4,7 @@ using System.Data.Common;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace AsyncPostgresClient
+namespace Lennox.AsyncPostgresClient
 {
     public class PostgresCommand : DbCommand
     {

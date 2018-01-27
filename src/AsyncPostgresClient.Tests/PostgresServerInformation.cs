@@ -2,7 +2,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace AsyncPostgresClient.Tests
+namespace Lennox.AsyncPostgresClient.Tests
 {
     public static class PostgresServerInformation
     {

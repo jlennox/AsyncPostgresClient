@@ -1,8 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Text;
 
-namespace AsyncPostgresClient.Tests
+namespace Lennox.AsyncPostgresClient.Tests
 {
     internal static class WiresharkBuffer
     {

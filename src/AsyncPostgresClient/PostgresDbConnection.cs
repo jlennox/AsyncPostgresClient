@@ -1,15 +1,15 @@
-﻿using AsyncPostgresClient.Extension;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
-using System.Linq;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
+using Lennox.AsyncPostgresClient.Extension;
+using Lennox.AsyncPostgresClient.Pool;
 
-namespace AsyncPostgresClient
+namespace Lennox.AsyncPostgresClient
 {
     public class PostgresDbConnection : DbConnection
     {

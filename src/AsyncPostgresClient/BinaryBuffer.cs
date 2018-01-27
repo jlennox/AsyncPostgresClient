@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 
 #pragma warning disable CS3002 // Return type is not CLS-compliant
-namespace AsyncPostgresClient
+namespace Lennox.AsyncPostgresClient
 {
     public unsafe struct BinaryBuffer
     {

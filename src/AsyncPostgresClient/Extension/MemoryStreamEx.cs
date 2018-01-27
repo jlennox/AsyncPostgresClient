@@ -5,7 +5,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace AsyncPostgresClient.Extension
+namespace Lennox.AsyncPostgresClient.Extension
 {
     internal static class MemoryStreamEx
     {
