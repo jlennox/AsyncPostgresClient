@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
 using System.IO;
+using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,33 +12,64 @@ using Lennox.AsyncPostgresClient.Pool;
 
 namespace Lennox.AsyncPostgresClient
 {
-    public class PostgresDbConnection : DbConnection
+    public class PostgresDbConnection : PostgresDbConnection<ClrClient>
     {
-        private const int _bufferSize = 16 * 1024;
+        internal const int BufferSize = 16 * 1024;
 
         // Don't use the global array pool. This pool will contain all large
         // buffers of the same size.
         private static readonly IArrayPool<byte> _bufferPool =
             ArrayPool<byte>.InstanceDefault();
 
+        public PostgresDbConnection(string connectionString)
+            : base(connectionString, ClrConnectionStream.Default)
+        {
+        }
+
+        public PostgresDbConnection(string connectionString, bool asyncOnly)
+            : base(connectionString, ClrConnectionStream.Default, asyncOnly)
+        {
+        }
+
+        internal static byte[] GetBuffer()
+        {
+            return _bufferPool.Get(BufferSize);
+        }
+
+        internal static void FreeBuffer(ref byte[] buffer)
+        {
+            _bufferPool.Free(ref buffer);
+        }
+    }
+
+    public interface IPosgresDbConnection : IDbConnection
+    {
+        Task Query(bool async, string query,
+            CancellationToken cancellationToken);
+    }
+
+    public class PostgresDbConnection<TStream>
+        : DbConnection, IPosgresDbConnection
+    {
         public override string ConnectionString { get; set; }
         public override string Database { get; }
         public override ConnectionState State { get; }
         public override string DataSource { get; }
         public override string ServerVersion { get; }
 
-        private readonly IConnectionStream _connectionStream;
+        public bool AsyncOnly { get; }
+
+        private readonly IConnectionStream<TStream> _connectionStream;
         private readonly PostgresConnectionString _connectionString;
         private PostgresReadState _readState = new PostgresReadState();
         private PostgresClientState _clientState =
             PostgresClientState.CreateDefault();
 
-        private Stream _stream;
+        private TStream _stream;
         private MemoryStream _writeBuffer;
         private byte[] _buffer;
         private int _bufferOffset;
         private int _bufferCount;
-        private IPostgresMessage _bufferedMessage;
 
         private int _isDisposed;
         private readonly object _disposeSync = new object();
@@ -46,16 +78,20 @@ namespace Lennox.AsyncPostgresClient
 
         public PostgresDbConnection(
             string connectionString,
-            IConnectionStream connectionStream)
+            IConnectionStream<TStream> connectionStream,
+            bool asyncOnly)
         {
             _connectionString = new PostgresConnectionString(connectionString);
             _connectionStream = connectionStream;
-            _buffer = _bufferPool.Get(_bufferSize);
+            _buffer = PostgresDbConnection.GetBuffer();
             _writeBuffer = MemoryStreamPool.Get();
+            AsyncOnly = asyncOnly;
         }
 
-        public PostgresDbConnection(string connectionString)
-            : this(connectionString, ClrConnectionStream.Default)
+        public PostgresDbConnection(
+            string connectionString,
+            IConnectionStream<TStream> connectionStream)
+            : this(connectionString, connectionStream, false)
         {
         }
 
@@ -112,6 +148,27 @@ namespace Lennox.AsyncPostgresClient
 
                 await FlushWrites(async, cancellationToken)
                     .ConfigureAwait(false);
+
+                var authMessageTask = EnsureNextMessage<AuthenticationMessage>(
+                        async, cancellationToken);
+
+                using (var authMessage = await authMessageTask
+                    .ConfigureAwait(false))
+                {
+                    Authenticate(authMessage);
+                }
+
+                await FlushWrites(async, cancellationToken)
+                    .ConfigureAwait(false);
+
+                var authMessageOkTask = EnsureNextMessage<AuthenticationMessage>(
+                    async, cancellationToken);
+
+                using (var authOkMessage = await authMessageOkTask
+                    .ConfigureAwait(false))
+                {
+                    
+                }
             }
             finally
             {
@@ -133,15 +190,37 @@ namespace Lennox.AsyncPostgresClient
 
             using (var kancel = _cancel.Combine(cancellationToken))
             {
-                await _writeBuffer.CopyToAsync(async, _stream, kancel.Token)
-                    .ConfigureAwait(false);
+                var writeBuffer = _writeBuffer.GetBuffer();
+
+                await Send(async, writeBuffer, 0, (int)_writeBuffer.Length,
+                    kancel.Token).ConfigureAwait(false);
             }
 
             _writeBuffer.Position = 0;
             _writeBuffer.SetLength(0);
         }
 
-        internal async Task Query(
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private Task Send(
+            bool async, byte[] buffer, int offset, int count,
+            CancellationToken cancellationToken)
+        {
+            return _connectionStream.Send(
+                async, _stream, buffer, offset, count,
+                cancellationToken);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private ValueTask<int> Receive(
+            bool async, byte[] buffer, int offset, int count,
+            CancellationToken cancellationToken)
+        {
+            return _connectionStream.Receive(
+                async, _stream, buffer, offset, count,
+                cancellationToken);
+        }
+
+        async Task IPosgresDbConnection.Query(
             bool async, string query, CancellationToken cancellationToken)
         {
             WriteMessage(new QueryMessage {
@@ -195,59 +274,23 @@ namespace Lennox.AsyncPostgresClient
             return (T)message;
         }
 
-        // TODO: This should be generic with a type constraint.
-        private bool HandleSystemMessage(IPostgresMessage message)
-        {
-            if (message is ErrorResponseMessage errorMessage)
-            {
-                using (errorMessage)
-                {
-                    throw new PostgresErrorException(errorMessage);
-                }
-            }
-
-            if (message is AuthenticationMessage authMessage)
-            {
-                using (authMessage)
-                {
-                    Authenticate(authMessage);
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool PostgresMessageRead(out IPostgresMessage message)
         {
-            if (_bufferedMessage != null)
-            {
-                message = _bufferedMessage;
-                _bufferedMessage = null;
-                return true;
-            }
+            var foundMessage = PostgresMessage.ReadMessage(
+                _buffer, ref _bufferOffset, ref _bufferCount,
+                ref _readState, ref _clientState, out message);
 
-            while (true)
+            if (foundMessage)
             {
-                var foundMessage = PostgresMessage.ReadMessage(
-                    _buffer, ref _bufferOffset, ref _bufferCount,
-                    ref _readState, ref _clientState, out message);
-
-                if (foundMessage)
+                switch (message)
                 {
-                    switch (message)
-                    {
-                        case ErrorResponseMessage errorMessage:
-                            throw new PostgresErrorException(errorMessage);
-                        case AuthenticationMessage authMessage:
-                            Authenticate(authMessage);
-                            continue;
-                    }
+                    case ErrorResponseMessage errorMessage:
+                        throw new PostgresErrorException(errorMessage);
                 }
-
-                return foundMessage;
             }
+
+            return foundMessage;
         }
 
         private ValueTask<IPostgresMessage> ReadNextMessage(
@@ -283,8 +326,9 @@ namespace Lennox.AsyncPostgresClient
                 CheckDisposed();
 
                 _bufferOffset = 0;
-                var readTask = _stream.ReadAsync(
-                    async, _buffer, 0, _bufferSize, kancel.Token);
+                var readTask = Receive(
+                    async, _buffer, 0, PostgresDbConnection.BufferSize,
+                    kancel.Token);
 
                 _bufferCount = await readTask.ConfigureAwait(false);
 
@@ -325,9 +369,9 @@ namespace Lennox.AsyncPostgresClient
                     return;
                 }
 
-                _bufferPool.Free(ref _buffer);
+                PostgresDbConnection.FreeBuffer(ref _buffer);
                 MemoryStreamPool.Free(ref _writeBuffer);
-                _stream.TryDispose();
+                _connectionStream.Dispose(_stream);
                 _cancel.TryCancelDispose();
             }
 

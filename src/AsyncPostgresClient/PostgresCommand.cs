@@ -18,9 +18,9 @@ namespace Lennox.AsyncPostgresClient
         public override bool DesignTimeVisible { get; set; }
 
         private readonly string _command;
-        private readonly PostgresDbConnection _connection;
+        private readonly IPosgresDbConnection _connection;
 
-        public PostgresCommand(string command, PostgresDbConnection connection)
+        public PostgresCommand(string command, IPosgresDbConnection connection)
         {
             _command = command;
             _connection = connection;
