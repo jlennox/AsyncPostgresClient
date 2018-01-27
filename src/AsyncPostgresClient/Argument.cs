@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
 namespace Lennox.AsyncPostgresClient
@@ -22,6 +23,27 @@ namespace Lennox.AsyncPostgresClient
             if (value == null)
             {
                 throw new ArgumentNullException(name, message);
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void IsEqual<T>(string name, T expected, T actual)
+            where T : IEquatable<T>
+        {
+            if (!EqualityComparer<T>.Default.Equals(expected, actual))
+            {
+                throw new ArgumentOutOfRangeException(name, actual,
+                    $"Unexpected value. Expected '{expected}', received '{actual}'");
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void HasValue<T>(string name, T expected, T actual, string message)
+            where T : IEquatable<T>
+        {
+            if (!EqualityComparer<T>.Default.Equals(expected, actual))
+            {
+                throw new ArgumentOutOfRangeException(name, actual, message);
             }
         }
     }

@@ -1,7 +1,7 @@
 using System.Linq;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
-namespace Lennox.AsyncPostgresClient.Tests
+namespace Lennox.AsyncPostgresClient.Tests.Protocol
 {
     internal abstract class PostgresStreamTest
     {

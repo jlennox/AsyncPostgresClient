@@ -1,7 +1,7 @@
 ﻿using System.IO;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
-namespace Lennox.AsyncPostgresClient.Tests
+namespace Lennox.AsyncPostgresClient.Tests.Protocol
 {
     [TestClass]
     public class PostgresCapturedStreamReadTests

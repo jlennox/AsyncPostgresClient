@@ -167,7 +167,14 @@ namespace Lennox.AsyncPostgresClient
                 using (var authOkMessage = await authMessageOkTask
                     .ConfigureAwait(false))
                 {
-                    
+                    if (authOkMessage.AuthenticationMessageType !=
+                        AuthenticationMessageType.Ok)
+                    {
+                        throw new ArgumentOutOfRangeException(
+                            nameof(AuthenticationMessageType),
+                            authOkMessage.AuthenticationMessageType,
+                            "Authentication error.");
+                    }
                 }
             }
             finally

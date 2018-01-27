@@ -394,13 +394,20 @@ namespace Lennox.AsyncPostgresClient
     {
         public const byte MessageId = (byte) 'R';
 
-        public AuthenticationMessageType AuthenticationMessageType { get; private set; }
+        public AuthenticationMessageType AuthenticationMessageType { get; internal set; }
 
         // AuthenticationMessageType.MD5Password type only.
         public byte[] MD5PasswordSalt => _dataBuffer;
 
         // AuthenticationMessageType.GSSContinue type only.
         public byte[] GSSAuthenticationData => _dataBuffer;
+
+        // For testing purposes.
+        internal byte[] DataBuffer
+        {
+            get => _dataBuffer;
+            set => _dataBuffer = value;
+        }
 
         private byte[] _dataBuffer;
 
@@ -1436,7 +1443,8 @@ namespace Lennox.AsyncPostgresClient
             Argument.HasValue(nameof(Password), Password);
 
             ms.WriteByte(MessageId);
-            ms.WriteNetwork(2 + PasswordLength);
+            // Length + terminator.
+            ms.WriteNetwork(4 + 1 + PasswordLength);
             ms.Write(Password, 0, PasswordLength);
             ms.WriteByte(0);
         }
@@ -1457,17 +1465,19 @@ namespace Lennox.AsyncPostgresClient
             // http://kn0.ninja/blog/postgresql-pass-the-hashed-hash/
             // MD5(MD5(P + username) + connection-salt))
 
-            Argument.HasValue(
-                nameof(authenticationMessage.MD5PasswordSalt),
-                authenticationMessage.MD5PasswordSalt);
+            const int saltLength = 4;
+            var salt = authenticationMessage.MD5PasswordSalt;
+
+            Argument.HasValue(nameof(salt), salt);
+            Argument.IsEqual(nameof(salt), saltLength, salt.Length);
 
             var passwordMessage = new PasswordMessage();
             MD5 md5 = null;
             byte[] buffer = null;
+            byte[] asciiBuffer = null;
             var encoding = state.ClientEncoding;
             var username = connectionString.Username;
             var password = connectionString.Password;
-            var salt = authenticationMessage.MD5PasswordSalt;
 
             try
             {
@@ -1476,48 +1486,52 @@ namespace Lennox.AsyncPostgresClient
                 var maxByteCount = encoding.GetMaxByteCount(characterCount);
                 buffer = ArrayPool<byte>.GetArray(maxByteCount);
                 var actualByteCount = encoding.GetBytes(
-                    username, 0, username.Length, buffer, 0);
-                actualByteCount = +encoding.GetBytes(
-                    password, 0, password.Length, buffer, actualByteCount);
+                    password, 0, password.Length, buffer, 0);
+                actualByteCount += encoding.GetBytes(
+                    username, 0, username.Length, buffer, actualByteCount);
 
                 var unsaltedHash = md5.ComputeHash(buffer, 0, actualByteCount);
-                var unsaltedHashAsciiLength = unsaltedHash.Length * 2;
-                var saltedHashLength = unsaltedHashAsciiLength + 4;
+                var saltedHashLength = unsaltedHash.Length * 2 + saltLength;
 
                 ArrayPool.Free(ref buffer);
                 buffer = ArrayPool<byte>.GetArray(saltedHashLength);
 
                 HexEncoding.WriteAscii(
-                    buffer, 0, buffer.Length,
+                    buffer, 0, unsaltedHash.Length,
                     unsaltedHash, 0, unsaltedHash.Length);
 
-                salt.CopyTo(buffer, unsaltedHashAsciiLength);
+                buffer[saltedHashLength - saltLength] = salt[0];
+                buffer[saltedHashLength - saltLength + 1] = salt[1];
+                buffer[saltedHashLength - saltLength + 2] = salt[2];
+                buffer[saltedHashLength - saltLength + 3] = salt[3];
 
                 var saltedHash = md5.ComputeHash(buffer, 0, saltedHashLength);
+
+                // + 3 is for the "md5" prefix.
                 var passwordLength = saltedHash.Length * 2 + 3;
 
-                ArrayPool.Free(ref buffer);
-                buffer = ArrayPool<byte>.GetArray(passwordLength);
-
-                buffer[0] = (byte)'m';
-                buffer[1] = (byte)'d';
-                buffer[2] = (byte)'5';
+                asciiBuffer = ArrayPool<byte>.GetArray(passwordLength);
 
                 HexEncoding.WriteAscii(
-                    buffer, 3, buffer.Length - 3,
+                    asciiBuffer, 3, passwordLength,
                     saltedHash, 0, saltedHash.Length);
 
-                passwordMessage.Password = buffer;
+                asciiBuffer[0] = (byte)'m';
+                asciiBuffer[1] = (byte)'d';
+                asciiBuffer[2] = (byte)'5';
+
+                passwordMessage.Password = asciiBuffer;
                 passwordMessage.PasswordLength = passwordLength;
             }
             catch
             {
                 // Only free in case of exception. In the non-exceptional case
                 // this will be free'ed when PasswordMessage is disposed.
-                ArrayPool.Free(ref buffer);
+                ArrayPool.Free(ref asciiBuffer);
             }
             finally
             {
+                ArrayPool.Free(ref buffer);
                 md5.TryDispose();
             }
 

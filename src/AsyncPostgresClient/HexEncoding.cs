@@ -21,9 +21,9 @@ namespace Lennox.AsyncPostgresClient
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static byte NibbleToHex(int b)
+        internal static byte NibbleToHex(int b)
         {
-            return (byte)(b < 10 ? '0' + b : 'A' + b);
+            return (byte)(b < 10 ? '0' + b : 'a' + (b - 10));
         }
     }
 }

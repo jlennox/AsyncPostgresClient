@@ -1,6 +1,6 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
-namespace Lennox.AsyncPostgresClient.Tests
+namespace Lennox.AsyncPostgresClient.Tests.Protocol
 {
     // Tests performed against live captures of Postgres streams captured
     // using Wireshark.
