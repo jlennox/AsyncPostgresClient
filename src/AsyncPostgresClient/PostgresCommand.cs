@@ -18,9 +18,11 @@ namespace Lennox.AsyncPostgresClient
         public override bool DesignTimeVisible { get; set; }
 
         private readonly string _command;
-        private readonly IPosgresDbConnection _connection;
+        private readonly PostgresDbConnectionBase _connection;
 
-        public PostgresCommand(string command, IPosgresDbConnection connection)
+        public PostgresCommand(
+            string command,
+            PostgresDbConnectionBase connection)
         {
             _command = command;
             _connection = connection;
@@ -33,11 +35,13 @@ namespace Lennox.AsyncPostgresClient
 
         public override int ExecuteNonQuery()
         {
+            _connection.CheckAsyncOnly();
             throw new NotImplementedException();
         }
 
         public override object ExecuteScalar()
         {
+            _connection.CheckAsyncOnly();
             throw new NotImplementedException();
         }
 
@@ -61,6 +65,7 @@ namespace Lennox.AsyncPostgresClient
         protected override DbDataReader ExecuteDbDataReader(
             CommandBehavior behavior)
         {
+            _connection.CheckAsyncOnly();
             throw new NotImplementedException();
         }
 
@@ -68,12 +73,14 @@ namespace Lennox.AsyncPostgresClient
             CommandBehavior behavior,
             CancellationToken cancellationToken)
         {
-            var reader = new PostgresDbDataReader(behavior, cancellationToken);
+            var reader = new PostgresDbDataReader(
+                behavior, _connection, cancellationToken);
 
             return Task.FromResult<DbDataReader>(reader);
         }
 
-        public override Task<int> ExecuteNonQueryAsync(CancellationToken cancellationToken)
+        public override Task<int> ExecuteNonQueryAsync(
+            CancellationToken cancellationToken)
         {
             throw new NotImplementedException();
         }

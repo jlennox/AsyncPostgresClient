@@ -42,14 +42,69 @@ namespace Lennox.AsyncPostgresClient
         }
     }
 
-    public interface IPosgresDbConnection : IDbConnection
+    public class PostgresDbConnection<TStream> : PostgresDbConnectionBase
     {
-        Task Query(bool async, string query,
-            CancellationToken cancellationToken);
+        private readonly IConnectionStream<TStream> _connectionStream;
+        private TStream _stream;
+
+        public PostgresDbConnection(
+            string connectionString,
+            IConnectionStream<TStream> connectionStream,
+            bool asyncOnly)
+        : base(connectionString, asyncOnly)
+        {
+            _connectionStream = connectionStream;
+        }
+
+        public PostgresDbConnection(
+            string connectionString,
+            IConnectionStream<TStream> connectionStream)
+            : this(connectionString, connectionStream, false)
+        {
+        }
+
+        protected override Task CreateConnection(
+            CancellationToken cancellationToken)
+        {
+            _stream = _connectionStream.CreateTcpStream(
+                PostgresConnectionString.Hostname,
+                PostgresConnectionString.Port);
+
+            return Task.CompletedTask;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        protected override Task Send(
+            bool async, byte[] buffer, int offset, int count,
+            CancellationToken cancellationToken)
+        {
+            return _connectionStream.Send(
+                async, _stream, buffer, offset, count,
+                cancellationToken);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        protected override ValueTask<int> Receive(
+            bool async, byte[] buffer, int offset, int count,
+            CancellationToken cancellationToken)
+        {
+            return _connectionStream.Receive(
+                async, _stream, buffer, offset, count,
+                cancellationToken);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _connectionStream.Dispose(_stream);
+            }
+
+            base.Dispose(disposing);
+        }
     }
 
-    public class PostgresDbConnection<TStream>
-        : DbConnection, IPosgresDbConnection
+    public abstract class PostgresDbConnectionBase : DbConnection
     {
         public override string ConnectionString { get; set; }
         public override string Database { get; }
@@ -59,13 +114,11 @@ namespace Lennox.AsyncPostgresClient
 
         public bool AsyncOnly { get; }
 
-        private readonly IConnectionStream<TStream> _connectionStream;
-        private readonly PostgresConnectionString _connectionString;
+        protected readonly PostgresConnectionString PostgresConnectionString;
         private PostgresReadState _readState = new PostgresReadState();
         private PostgresClientState _clientState =
             PostgresClientState.CreateDefault();
 
-        private TStream _stream;
         private MemoryStream _writeBuffer;
         private byte[] _buffer;
         private int _bufferOffset;
@@ -76,23 +129,14 @@ namespace Lennox.AsyncPostgresClient
         private readonly CancellationTokenSource _cancel =
             new CancellationTokenSource();
 
-        public PostgresDbConnection(
+        protected PostgresDbConnectionBase(
             string connectionString,
-            IConnectionStream<TStream> connectionStream,
             bool asyncOnly)
         {
-            _connectionString = new PostgresConnectionString(connectionString);
-            _connectionStream = connectionStream;
+            PostgresConnectionString = new PostgresConnectionString(connectionString);
             _buffer = PostgresDbConnection.GetBuffer();
             _writeBuffer = MemoryStreamPool.Get();
             AsyncOnly = asyncOnly;
-        }
-
-        public PostgresDbConnection(
-            string connectionString,
-            IConnectionStream<TStream> connectionStream)
-            : this(connectionString, connectionStream, false)
-        {
         }
 
         protected override DbTransaction BeginDbTransaction(
@@ -112,6 +156,8 @@ namespace Lennox.AsyncPostgresClient
 
         public override void Open()
         {
+            CheckAsyncOnly();
+
             OpenAsync(false, CancellationToken.None).Forget();
         }
 
@@ -121,12 +167,21 @@ namespace Lennox.AsyncPostgresClient
             return OpenAsync(true, cancellationToken);
         }
 
+        protected abstract Task CreateConnection(
+            CancellationToken cancellationToken);
+
+        protected abstract Task Send(
+            bool async, byte[] buffer, int offset, int count,
+            CancellationToken cancellationToken);
+
+        protected abstract ValueTask<int> Receive(
+            bool async, byte[] buffer, int offset, int count,
+            CancellationToken cancellationToken);
+
         private async Task OpenAsync(bool async,
             CancellationToken cancellationToken)
         {
-            _stream = _connectionStream.CreateTcpStream(
-                _connectionString.Hostname,
-                _connectionString.Port);
+            await CreateConnection(cancellationToken);
 
             const int messageCount = 3;
             var messages = ArrayPool<KeyValuePair<string, string>>
@@ -135,52 +190,71 @@ namespace Lennox.AsyncPostgresClient
             try
             {
                 messages[0] = new KeyValuePair<string, string>(
-                    "user", _connectionString.Username);
+                    "user", PostgresConnectionString.Username);
                 messages[1] = new KeyValuePair<string, string>(
-                    "client_encoding", _connectionString.Encoding);
+                    "client_encoding", PostgresConnectionString.Encoding);
                 messages[2] = new KeyValuePair<string, string>(
-                    "database", _connectionString.Database);
+                    "database", PostgresConnectionString.Database);
 
                 WriteMessage(new StartupMessage {
                     MessageCount = messageCount,
                     Messages = messages
                 });
-
-                await FlushWrites(async, cancellationToken)
-                    .ConfigureAwait(false);
-
-                var authMessageTask = EnsureNextMessage<AuthenticationMessage>(
-                        async, cancellationToken);
-
-                using (var authMessage = await authMessageTask
-                    .ConfigureAwait(false))
-                {
-                    Authenticate(authMessage);
-                }
-
-                await FlushWrites(async, cancellationToken)
-                    .ConfigureAwait(false);
-
-                var authMessageOkTask = EnsureNextMessage<AuthenticationMessage>(
-                    async, cancellationToken);
-
-                using (var authOkMessage = await authMessageOkTask
-                    .ConfigureAwait(false))
-                {
-                    if (authOkMessage.AuthenticationMessageType !=
-                        AuthenticationMessageType.Ok)
-                    {
-                        throw new ArgumentOutOfRangeException(
-                            nameof(AuthenticationMessageType),
-                            authOkMessage.AuthenticationMessageType,
-                            "Authentication error.");
-                    }
-                }
             }
             finally
             {
                 ArrayPool.Free(ref messages);
             }
+
+            await FlushWrites(async, cancellationToken)
+                .ConfigureAwait(false);
+
+            var authMessageTask = EnsureNextMessage<AuthenticationMessage>(
+                        async, cancellationToken);
+
+            using (var authMessage = await authMessageTask
+                .ConfigureAwait(false))
+            {
+                Authenticate(authMessage);
+            }
+
+            await FlushWrites(async, cancellationToken)
+                .ConfigureAwait(false);
+
+            var authMessageOkTask = EnsureNextMessage<AuthenticationMessage>(
+                async, cancellationToken);
+
+            using (var authOkMessage = await authMessageOkTask
+                .ConfigureAwait(false))
+            {
+                authOkMessage.AsssertIsOk();
+            }
+
+            var foundIdleMessage = false;
+
+            do
+            {
+                var message = await ReadNextMessage(async, cancellationToken)
+                    .ConfigureAwait(false);
+
+                switch (message)
+                {
+                    case ParameterStatusMessage paramMessage:
+                        break;
+                    case BackendKeyDataMessage keyDataMessage:
+                        break;
+                    case NoticeResponseMessage noticeMessage:
+                        break;
+                    case ReadyForQueryMessage readyMessage:
+                        readyMessage.AssertType(TransactionIndicatorType.Idle);
+                        foundIdleMessage = true;
+                        break;
+                    default:
+                        throw new ArgumentOutOfRangeException(
+                            nameof(message), message.GetType(),
+                            "Unexpected message type.");
+                }
+            } while (!foundIdleMessage);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -208,26 +282,15 @@ namespace Lennox.AsyncPostgresClient
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private Task Send(
-            bool async, byte[] buffer, int offset, int count,
-            CancellationToken cancellationToken)
+        internal void CheckAsyncOnly()
         {
-            return _connectionStream.Send(
-                async, _stream, buffer, offset, count,
-                cancellationToken);
+            if (AsyncOnly)
+            {
+                throw new IOException("Non-async access has been disabled.");
+            }
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private ValueTask<int> Receive(
-            bool async, byte[] buffer, int offset, int count,
-            CancellationToken cancellationToken)
-        {
-            return _connectionStream.Receive(
-                async, _stream, buffer, offset, count,
-                cancellationToken);
-        }
-
-        async Task IPosgresDbConnection.Query(
+        internal async Task Query(
             bool async, string query, CancellationToken cancellationToken)
         {
             WriteMessage(new QueryMessage {
@@ -235,10 +298,38 @@ namespace Lennox.AsyncPostgresClient
             });
 
             await FlushWrites(async, cancellationToken).ConfigureAwait(false);
-            await EnsureNextMessage<CommandCompleteMessage>(
-                async, cancellationToken).ConfigureAwait(false);
-            await EnsureNextMessage<ReadyForQueryMessage>(
-                async, cancellationToken).ConfigureAwait(false);
+
+            var foundIdleMessage = false;
+
+            do
+            {
+                var message = await ReadNextMessage(async, cancellationToken)
+                    .ConfigureAwait(false);
+
+                switch (message)
+                {
+                    case CommandCompleteMessage completeMessage:
+                        break;
+                    case CopyInResponseMessage copyInMessage:
+                        break;
+                    case RowDescriptionMessage rowMessage:
+                        break;
+                    case DataRowMessage dataRowMessage:
+                        break;
+                    case EmptyQueryResponseMessage emptyMessage:
+                        break;
+                    case NoticeResponseMessage noticeMessage:
+                        break;
+                    case ReadyForQueryMessage readyMessage:
+                        readyMessage.AssertType(TransactionIndicatorType.Idle);
+                        foundIdleMessage = true;
+                        break;
+                    default:
+                        throw new ArgumentOutOfRangeException(
+                            nameof(message), message.GetType(),
+                            "Unexpected message type.");
+                }
+            } while (!foundIdleMessage);
         }
 
         private void Authenticate(AuthenticationMessage authenticationMessage)
@@ -249,7 +340,7 @@ namespace Lennox.AsyncPostgresClient
                 case AuthenticationMessageType.MD5Password:
                     passwordMessage = PasswordMessage.CreateMd5(
                         authenticationMessage, _clientState,
-                        _connectionString);
+                        PostgresConnectionString);
                     break;
                 default:
                     throw new ArgumentOutOfRangeException(
@@ -378,7 +469,6 @@ namespace Lennox.AsyncPostgresClient
 
                 PostgresDbConnection.FreeBuffer(ref _buffer);
                 MemoryStreamPool.Free(ref _writeBuffer);
-                _connectionStream.Dispose(_stream);
                 _cancel.TryCancelDispose();
             }
 

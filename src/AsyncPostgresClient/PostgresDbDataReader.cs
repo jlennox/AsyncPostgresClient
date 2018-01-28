@@ -26,15 +26,17 @@ namespace Lennox.AsyncPostgresClient
         public override bool IsClosed { get; }
         public override int Depth { get; }
 
-
         private readonly CommandBehavior _behavior;
+        private readonly PostgresDbConnectionBase _connection;
         private readonly CancellationToken _cancellationToken;
 
         public PostgresDbDataReader(
             CommandBehavior behavior,
+            PostgresDbConnectionBase connection,
             CancellationToken cancellationToken)
         {
             _behavior = behavior;
+            _connection = connection;
             _cancellationToken = cancellationToken;
         }
 

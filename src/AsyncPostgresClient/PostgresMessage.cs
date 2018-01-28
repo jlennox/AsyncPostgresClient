@@ -437,6 +437,17 @@ namespace Lennox.AsyncPostgresClient
             throw new PostgresServerOnlyMessageException();
         }
 
+        public void AsssertIsOk()
+        {
+            if (AuthenticationMessageType != AuthenticationMessageType.Ok)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(AuthenticationMessageType),
+                    AuthenticationMessageType,
+                    "Authentication error.");
+            }
+        }
+
         public void Dispose()
         {
             ArrayPool.Free(ref _dataBuffer);
@@ -1606,6 +1617,17 @@ namespace Lennox.AsyncPostgresClient
         public void Write(ref PostgresClientState state, MemoryStream ms)
         {
             throw new PostgresServerOnlyMessageException();
+        }
+
+        public void AssertType(TransactionIndicatorType type)
+        {
+            if (TransactionIndicatorType != type)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(TransactionIndicatorType),
+                    TransactionIndicatorType,
+                    $"Unexpected transaction type, expected {type}.");
+            }
         }
     }
 
