@@ -3,6 +3,7 @@ using System.Data;
 using System.Data.Common;
 using System.Threading;
 using System.Threading.Tasks;
+using Lennox.AsyncPostgresClient.Extension;
 
 namespace Lennox.AsyncPostgresClient
 {
@@ -39,12 +40,6 @@ namespace Lennox.AsyncPostgresClient
             throw new NotImplementedException();
         }
 
-        public override object ExecuteScalar()
-        {
-            _connection.CheckAsyncOnly();
-            throw new NotImplementedException();
-        }
-
         public override void Prepare()
         {
             throw new NotImplementedException();
@@ -55,10 +50,28 @@ namespace Lennox.AsyncPostgresClient
             throw new NotImplementedException();
         }
 
-        public override async Task<object> ExecuteScalarAsync(
+        public override object ExecuteScalar()
+        {
+            _connection.CheckAsyncOnly();
+
+            var scalarTask = ExecuteScalar(true, CancellationToken.None);
+
+            return scalarTask.CompletedTaskValue();
+        }
+
+        public override Task<object> ExecuteScalarAsync(
             CancellationToken cancellationToken)
         {
-            await _connection.Query(true, _command, cancellationToken);
+            return ExecuteScalar(true, cancellationToken).AsTask();
+        }
+
+        private async ValueTask<object> ExecuteScalar(
+            bool async,
+            CancellationToken cancellationToken)
+        {
+            await _connection.Query(async, _command, cancellationToken)
+                .ConfigureAwait(false);
+
             return 0;
         }
 
@@ -66,17 +79,33 @@ namespace Lennox.AsyncPostgresClient
             CommandBehavior behavior)
         {
             _connection.CheckAsyncOnly();
-            throw new NotImplementedException();
+
+            var readerTask = ExecuteDbDataReader(
+                false, behavior, CancellationToken.None);
+
+            return readerTask.CompletedTaskValue();
         }
 
         protected override Task<DbDataReader> ExecuteDbDataReaderAsync(
             CommandBehavior behavior,
             CancellationToken cancellationToken)
         {
+            return ExecuteDbDataReader(
+                false, behavior, CancellationToken.None).AsTask();
+        }
+
+        private async ValueTask<DbDataReader> ExecuteDbDataReader(
+            bool async,
+            CommandBehavior behavior,
+            CancellationToken cancellationToken)
+        {
+            await _connection.Query(async, _command, cancellationToken)
+                .ConfigureAwait(false);
+
             var reader = new PostgresDbDataReader(
                 behavior, _connection, cancellationToken);
 
-            return Task.FromResult<DbDataReader>(reader);
+            return reader;
         }
 
         public override Task<int> ExecuteNonQueryAsync(

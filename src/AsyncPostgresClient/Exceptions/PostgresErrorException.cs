@@ -1,7 +1,7 @@
 ﻿using System;
 using Lennox.AsyncPostgresClient.Pool;
 
-namespace Lennox.AsyncPostgresClient
+namespace Lennox.AsyncPostgresClient.Exceptions
 {
     public class PostgresErrorException : Exception
     {
@@ -37,6 +37,27 @@ namespace Lennox.AsyncPostgresClient
             {
                 StringBuilderPool.Free(ref sb);
             }
+        }
+    }
+
+    public class PostgresInvalidMessageException : Exception
+    {
+        internal PostgresInvalidMessageException(IPostgresMessage message)
+            : base(Describe(message))
+        {
+
+        }
+
+        internal PostgresInvalidMessageException(
+            IPostgresMessage message, string description)
+            : base($"{Describe(message)} {description}")
+        {
+
+        }
+
+        private static string Describe(IPostgresMessage message)
+        {
+            return $"Message type {message.GetType()} not expected at this time.";
         }
     }
 }

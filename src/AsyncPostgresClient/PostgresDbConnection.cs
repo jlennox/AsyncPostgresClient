@@ -3,10 +3,10 @@ using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
 using System.IO;
-using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
+using Lennox.AsyncPostgresClient.Exceptions;
 using Lennox.AsyncPostgresClient.Extension;
 using Lennox.AsyncPostgresClient.Pool;
 
@@ -51,7 +51,7 @@ namespace Lennox.AsyncPostgresClient
             string connectionString,
             IConnectionStream<TStream> connectionStream,
             bool asyncOnly)
-        : base(connectionString, asyncOnly)
+            : base(connectionString, asyncOnly)
         {
             _connectionStream = connectionStream;
         }
@@ -113,6 +113,12 @@ namespace Lennox.AsyncPostgresClient
         public override string ServerVersion { get; }
 
         public bool AsyncOnly { get; }
+
+        public delegate void NoticeResponseEvent(
+            PostgresDbConnectionBase connection,
+            FieldValueResponse[] notices);
+
+        public event NoticeResponseEvent NoticeResponse;
 
         protected readonly PostgresConnectionString PostgresConnectionString;
         private PostgresReadState _readState = new PostgresReadState();
@@ -181,7 +187,8 @@ namespace Lennox.AsyncPostgresClient
         private async Task OpenAsync(bool async,
             CancellationToken cancellationToken)
         {
-            await CreateConnection(cancellationToken);
+            await CreateConnection(cancellationToken)
+                .ConfigureAwait(false);
 
             const int messageCount = 3;
             var messages = ArrayPool<KeyValuePair<string, string>>
@@ -239,20 +246,14 @@ namespace Lennox.AsyncPostgresClient
 
                 switch (message)
                 {
-                    case ParameterStatusMessage paramMessage:
-                        break;
                     case BackendKeyDataMessage keyDataMessage:
-                        break;
-                    case NoticeResponseMessage noticeMessage:
                         break;
                     case ReadyForQueryMessage readyMessage:
                         readyMessage.AssertType(TransactionIndicatorType.Idle);
                         foundIdleMessage = true;
                         break;
                     default:
-                        throw new ArgumentOutOfRangeException(
-                            nameof(message), message.GetType(),
-                            "Unexpected message type.");
+                        throw new PostgresInvalidMessageException(message);
                 }
             } while (!foundIdleMessage);
         }
@@ -298,38 +299,6 @@ namespace Lennox.AsyncPostgresClient
             });
 
             await FlushWrites(async, cancellationToken).ConfigureAwait(false);
-
-            var foundIdleMessage = false;
-
-            do
-            {
-                var message = await ReadNextMessage(async, cancellationToken)
-                    .ConfigureAwait(false);
-
-                switch (message)
-                {
-                    case CommandCompleteMessage completeMessage:
-                        break;
-                    case CopyInResponseMessage copyInMessage:
-                        break;
-                    case RowDescriptionMessage rowMessage:
-                        break;
-                    case DataRowMessage dataRowMessage:
-                        break;
-                    case EmptyQueryResponseMessage emptyMessage:
-                        break;
-                    case NoticeResponseMessage noticeMessage:
-                        break;
-                    case ReadyForQueryMessage readyMessage:
-                        readyMessage.AssertType(TransactionIndicatorType.Idle);
-                        foundIdleMessage = true;
-                        break;
-                    default:
-                        throw new ArgumentOutOfRangeException(
-                            nameof(message), message.GetType(),
-                            "Unexpected message type.");
-                }
-            } while (!foundIdleMessage);
         }
 
         private void Authenticate(AuthenticationMessage authenticationMessage)
@@ -375,23 +344,34 @@ namespace Lennox.AsyncPostgresClient
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool PostgresMessageRead(out IPostgresMessage message)
         {
-            var foundMessage = PostgresMessage.ReadMessage(
-                _buffer, ref _bufferOffset, ref _bufferCount,
-                ref _readState, ref _clientState, out message);
-
-            if (foundMessage)
+            while (true)
             {
-                switch (message)
-                {
-                    case ErrorResponseMessage errorMessage:
-                        throw new PostgresErrorException(errorMessage);
-                }
-            }
+                var foundMessage = PostgresMessage.ReadMessage(
+                    _buffer, ref _bufferOffset, ref _bufferCount,
+                    ref _readState, ref _clientState, out message);
 
-            return foundMessage;
+                if (foundMessage)
+                {
+                    // https://www.postgresql.org/docs/10/static/protocol-flow.html#PROTOCOL-ASYNC
+                    // TODO: Handle 'LISTEN'
+                    switch (message)
+                    {
+                        case ErrorResponseMessage errorMessage:
+                            throw new PostgresErrorException(errorMessage);
+                        case NoticeResponseMessage noticeMessage:
+                            NoticeResponse?.Invoke(
+                                this, noticeMessage.PublicCloneNotices());
+                            continue;
+                        case ParameterStatusMessage paramMessage:
+                            continue;
+                    }
+                }
+
+                return foundMessage;
+            }
         }
 
-        private ValueTask<IPostgresMessage> ReadNextMessage(
+        internal ValueTask<IPostgresMessage> ReadNextMessage(
             bool async, CancellationToken cancellationToken)
         {
             // Attempt a read without allocating a Task or combined
@@ -403,12 +383,10 @@ namespace Lennox.AsyncPostgresClient
                 return new ValueTask<IPostgresMessage>(message);
             }
 
-            var readTask = ReadNextMessageCore(async, cancellationToken);
-
-            return new ValueTask<IPostgresMessage>(readTask);
+            return ReadNextMessageCore(async, cancellationToken);
         }
 
-        private async Task<IPostgresMessage> ReadNextMessageCore(
+        private async ValueTask<IPostgresMessage> ReadNextMessageCore(
             bool async, CancellationToken cancellationToken)
         {
             using (var kancel = _cancel.Combine(cancellationToken))

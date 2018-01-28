@@ -284,6 +284,42 @@ namespace Lennox.AsyncPostgresClient
         Binary = 1
     }
 
+    public enum MessageFieldType
+    {
+        /// <summary>the field contents are ERROR, FATAL, or PANIC (in an error message), or WARNING, NOTICE, DEBUG, INFO, or LOG (in a notice message), or a localized translation of one of these. Always present.</summary>
+        Severity = (byte)'S',
+        /// <summary>the SQLSTATE code for the error (see Appendix A). Not localizable. Always present.</summary>
+        Code = (byte)'C',
+        /// <summary>the primary human-readable error message. This should be accurate but terse (typically one line). Always present.</summary>
+        Message = (byte)'M',
+        /// <summary>an optional secondary error message carrying more detail about the problem. Might run to multiple lines.</summary>
+        Detail = (byte)'D',
+        /// <summary>an optional suggestion what to do about the problem. This is intended to differ from Detail in that it offers advice (potentially inappropriate) rather than hard facts. Might run to multiple lines.</summary>
+        Hint = (byte)'H',
+        /// <summary>the field value is a decimal ASCII integer, indicating an error cursor position as an index into the original query string. The first character has index 1, and positions are measured in characters not bytes.</summary>
+        Position = (byte)'P',
+        /// <summary>this is defined the same as the P field, but it is used when the cursor position refers to an internally generated command rather than the one submitted by the client. The q field will always appear when this field appears.</summary>
+        InternalPosition = (byte)'p',
+        /// <summary>the text of a failed internally-generated command. This could be, for example, a SQL query issued by a PL/pgSQL function.</summary>
+        InternalQuery = (byte)'q',
+        /// <summary>an indication of the context in which the error occurred. Presently this includes a call stack traceback of active procedural language functions and internally-generated queries. The trace is one entry per line, most recent first.</summary>
+        Where = (byte)'W',
+        /// <summary>if the error was associated with a specific database object, the name of the schema containing that object, if any.</summary>
+        SchemaName = (byte)'s',
+        /// <summary>if the error was associated with a specific table, the name of the table. (Refer to the schema name field for the name of the table's schema.)</summary>
+        TableName = (byte)'t',
+        /// <summary>if the error was associated with a specific table column, the name of the column. (Refer to the schema and table name fields to identify the table.)</summary>
+        ColumnName = (byte)'c',
+        /// <summary>if the error was associated with a specific data type, the name of the data type. (Refer to the schema name field for the name of the data type's schema.)</summary>
+        DataTypeName = (byte)'d',
+        /// <summary>if the error was associated with a specific constraint, the name of the constraint. Refer to fields listed above for the associated table or domain. (For this purpose, indexes are treated as constraints, even if they weren't created with constraint syntax.)</summary>
+        ConstraintName = (byte)'n',
+        /// <summary>the file name of the source-code location where the error was reported.</summary>
+        File = (byte)'F',
+        /// <summary>the line number of the source-code location where the error was reported.</summary>
+        Line = (byte)'L',
+    }
+
     internal interface ICopyResponseMessage : IPostgresMessage
     {
         PostgresFormatCode CopyFormatCode { get; set; }
@@ -300,6 +336,9 @@ namespace Lennox.AsyncPostgresClient
             message.CopyFormatCode = (PostgresFormatCode)bb.ReadByte();
             message.ColumnCount = bb.ReadShortNetwork();
 
+            AssertMessageValue.Positive(
+                nameof(message.ColumnCount),
+                message.ColumnCount);
             AssertMessageValue.Length(message.ColumnCount * 2 + 5, length);
 
             message.ColumnFormatCodes = new PostgresFormatCode[message.ColumnCount];
@@ -682,6 +721,8 @@ namespace Lennox.AsyncPostgresClient
 
         public void Write(ref PostgresClientState state, MemoryStream ms)
         {
+            AssertMessageValue.Positive(nameof(DataByteCount), DataByteCount);
+
             ms.WriteByte(MessageId);
             ms.WriteNetwork(DataByteCount + 4);
             ms.WriteNetwork(Data, DataByteCount);
@@ -901,7 +942,6 @@ namespace Lennox.AsyncPostgresClient
         public void Read(ref PostgresClientState state, BinaryBuffer bb, int length)
         {
             ColumnCount = bb.ReadShortNetwork();
-
             AssertMessageValue.Positive(nameof(ColumnCount), ColumnCount);
 
             var actualLength = 6;
@@ -1000,16 +1040,16 @@ namespace Lennox.AsyncPostgresClient
         }
     }
 
-    internal struct FieldValueResponse
+    public struct FieldValueResponse
     {
         private static List<FieldValueResponse> _responseList;
 
-        public byte FieldType { get; private set; }
+        public MessageFieldType FieldType { get; private set; } // byte
         public string Value { get; private set; }
 
-        public int ComputedLength { get; private set; }
+        internal int ComputedLength { get; private set; }
 
-        public static FieldValueResponse? Create(
+        internal static FieldValueResponse? Create(
             ref PostgresClientState state, ref BinaryBuffer bb)
         {
             var type = bb.ReadByte();
@@ -1020,13 +1060,13 @@ namespace Lennox.AsyncPostgresClient
             }
 
             return new FieldValueResponse {
-                FieldType = type,
+                FieldType = (MessageFieldType)type,
                 Value = bb.ReadString(state.ServerEncoding, out var sLength),
                 ComputedLength = 1 + sLength
             };
         }
 
-        public static FieldValueResponse[] CreateAll(
+        internal static FieldValueResponse[] CreateAll(
             ref PostgresClientState state, BinaryBuffer bb,
             out int length, out int count)
         {
@@ -1042,7 +1082,7 @@ namespace Lennox.AsyncPostgresClient
 
                 if (!error.HasValue)
                 {
-                    length += 1;
+                    length += 1; // Count the terminating '\0'
                     break;
                 }
 
@@ -1174,6 +1214,16 @@ namespace Lennox.AsyncPostgresClient
 
         public void Write(ref PostgresClientState state, MemoryStream ms)
         {
+            AssertMessageValue.Positive(
+                nameof(ArgumentFormatCodeCount),
+                ArgumentFormatCodeCount);
+            AssertMessageValue.Positive(
+                nameof(ArgumentCount),
+                ArgumentCount);
+            AssertMessageValue.Positive(
+                nameof(ArgumentByteCount),
+                ArgumentByteCount);
+
             ms.WriteByte(MessageId);
             ms.WriteNetwork(18 + ArgumentFormatCodeCount * 2 + ArgumentByteCount);
             ms.WriteNetwork(ObjectId);
@@ -1225,6 +1275,9 @@ namespace Lennox.AsyncPostgresClient
         public void Read(ref PostgresClientState state, BinaryBuffer bb, int length)
         {
             ResponseByteCount = bb.ReadIntNetwork();
+            AssertMessageValue.Positive(
+                nameof(ResponseByteCount),
+                ResponseByteCount);
 
             AssertMessageValue.Length(ResponseByteCount + 8, length);
 
@@ -1259,7 +1312,7 @@ namespace Lennox.AsyncPostgresClient
         }
     }
 
-    internal struct NoticeResponseMessage : IPostgresMessage
+    internal struct NoticeResponseMessage : IPostgresMessage, IDisposable
     {
         public const byte MessageId = (byte)'N';
 
@@ -1280,6 +1333,30 @@ namespace Lennox.AsyncPostgresClient
         public void Write(ref PostgresClientState state, MemoryStream ms)
         {
             throw new PostgresServerOnlyMessageException();
+        }
+
+        // Used to create a copy that is not managed by our object pool and is
+        // of the exact size.
+        public FieldValueResponse[] PublicCloneNotices()
+        {
+            if (NoticeCount == 0)
+            {
+                return EmptyArray<FieldValueResponse>.Value;
+            }
+
+            var clone = new FieldValueResponse[NoticeCount];
+
+            for (var i = 0; i < NoticeCount; ++i)
+            {
+                clone[i] = _notices[i];
+            }
+
+            return clone;
+        }
+
+        public void Dispose()
+        {
+            ArrayPool.Free(ref _notices);
         }
     }
 
@@ -1647,7 +1724,7 @@ namespace Lennox.AsyncPostgresClient
         internal static RowDescriptionField Create(
             ref PostgresClientState state, ref BinaryBuffer bb)
         {
-            return new RowDescriptionField {
+            var description = new RowDescriptionField {
                 Name = bb.ReadString(state.ServerEncoding, out var sLength),
                 TableObjectId = bb.ReadIntNetwork(),
                 ColumnIndex = bb.ReadShortNetwork(),
@@ -1657,6 +1734,15 @@ namespace Lennox.AsyncPostgresClient
                 FormatCode = (PostgresFormatCode)bb.ReadShortNetwork(),
                 ComputedLength = sLength + 18
             };
+
+            AssertMessageValue.Positive(
+                nameof(description.ColumnIndex),
+                description.ColumnIndex);
+
+            // DataTypeSize can be negative.
+            // "Note that negative values denote variable-width types."
+
+            return description;
         }
     }
 
@@ -1672,6 +1758,8 @@ namespace Lennox.AsyncPostgresClient
         public void Read(ref PostgresClientState state, BinaryBuffer bb, int length)
         {
             FieldCount = bb.ReadShortNetwork();
+            AssertMessageValue.Positive(nameof(FieldCount), FieldCount);
+
             _fields = ArrayPool<RowDescriptionField>.GetArray(FieldCount);
             var actualLength = 6;
             for (var i = 0; i < FieldCount; ++i)
