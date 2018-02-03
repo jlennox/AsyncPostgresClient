@@ -4,6 +4,7 @@ using System.Data;
 using System.Data.Common;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Lennox.AsyncPostgresClient.Exceptions;
@@ -124,6 +125,9 @@ namespace Lennox.AsyncPostgresClient
         private PostgresReadState _readState = new PostgresReadState();
         private PostgresClientState _clientState =
             PostgresClientState.CreateDefault();
+
+        internal Encoding ClientEncoding => _clientState.ClientEncoding;
+        internal Encoding ServerEncoding => _clientState.ServerEncoding;
 
         private MemoryStream _writeBuffer;
         private byte[] _buffer;

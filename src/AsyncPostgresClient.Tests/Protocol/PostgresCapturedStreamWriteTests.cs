@@ -186,7 +186,7 @@ namespace Lennox.AsyncPostgresClient.Tests.Protocol
             AssertBindComplete();
 
             AssertRowDescription(8, new[] {
-                new RowDescriptionField {
+                new ColumnDescription {
                     Name = "nspname",
                     TableObjectId = 2615,
                     ColumnIndex = 1,
@@ -194,7 +194,7 @@ namespace Lennox.AsyncPostgresClient.Tests.Protocol
                     DataTypeSize = 64,
                     TypeModifier = -1,
                     FormatCode = PostgresFormatCode.Text
-                }, new RowDescriptionField {
+                }, new ColumnDescription {
                     Name = "typname",
                     TableObjectId = 1247,
                     ColumnIndex = 1,
@@ -202,7 +202,7 @@ namespace Lennox.AsyncPostgresClient.Tests.Protocol
                     DataTypeSize = 64,
                     TypeModifier = -1,
                     FormatCode = PostgresFormatCode.Text
-                }, new RowDescriptionField {
+                }, new ColumnDescription {
                     Name = "oid",
                     TableObjectId = 1247,
                     ColumnIndex = -2,
@@ -210,7 +210,7 @@ namespace Lennox.AsyncPostgresClient.Tests.Protocol
                     DataTypeSize = 4,
                     TypeModifier = -1,
                     FormatCode = PostgresFormatCode.Text
-                }, new RowDescriptionField {
+                }, new ColumnDescription {
                     Name = "typrelid",
                     TableObjectId = 1247,
                     ColumnIndex = 11,
@@ -218,7 +218,7 @@ namespace Lennox.AsyncPostgresClient.Tests.Protocol
                     DataTypeSize = 4,
                     TypeModifier = -1,
                     FormatCode = PostgresFormatCode.Text
-                }, new RowDescriptionField {
+                }, new ColumnDescription {
                     Name = "typbasetype",
                     TableObjectId = 1247,
                     ColumnIndex = 24,
@@ -226,7 +226,7 @@ namespace Lennox.AsyncPostgresClient.Tests.Protocol
                     DataTypeSize = 4,
                     TypeModifier = -1,
                     FormatCode = PostgresFormatCode.Text
-                }, new RowDescriptionField {
+                }, new ColumnDescription {
                     Name = "type",
                     TableObjectId = 0,
                     ColumnIndex = 0,
@@ -234,7 +234,7 @@ namespace Lennox.AsyncPostgresClient.Tests.Protocol
                     DataTypeSize = 1,
                     TypeModifier = -1,
                     FormatCode = PostgresFormatCode.Text
-                }, new RowDescriptionField {
+                }, new ColumnDescription {
                     Name = "elemoid",
                     TableObjectId = 0,
                     ColumnIndex = 0,
@@ -242,7 +242,7 @@ namespace Lennox.AsyncPostgresClient.Tests.Protocol
                     DataTypeSize = 4,
                     TypeModifier = -1,
                     FormatCode = PostgresFormatCode.Text
-                }, new RowDescriptionField {
+                }, new ColumnDescription {
                     Name = "ord",
                     TableObjectId = 0,
                     ColumnIndex = 0,

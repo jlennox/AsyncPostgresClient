@@ -1708,7 +1708,7 @@ namespace Lennox.AsyncPostgresClient
         }
     }
 
-    internal struct RowDescriptionField
+    internal struct ColumnDescription
     {
         public string Name { get; internal set; }
         public int TableObjectId { get; internal set; }
@@ -1721,10 +1721,10 @@ namespace Lennox.AsyncPostgresClient
         // Computed by us.
         public int ComputedLength { get; private set; }
 
-        internal static RowDescriptionField Create(
+        internal static ColumnDescription Create(
             ref PostgresClientState state, ref BinaryBuffer bb)
         {
-            var description = new RowDescriptionField {
+            var description = new ColumnDescription {
                 Name = bb.ReadString(state.ServerEncoding, out var sLength),
                 TableObjectId = bb.ReadIntNetwork(),
                 ColumnIndex = bb.ReadShortNetwork(),
@@ -1751,20 +1751,20 @@ namespace Lennox.AsyncPostgresClient
         public const byte MessageId = (byte)'T';
 
         public short FieldCount { get; private set; }
-        public RowDescriptionField[] Fields => _fields;
+        public ColumnDescription[] Fields => _fields;
 
-        private RowDescriptionField[] _fields;
+        private ColumnDescription[] _fields;
 
         public void Read(ref PostgresClientState state, BinaryBuffer bb, int length)
         {
             FieldCount = bb.ReadShortNetwork();
             AssertMessageValue.Positive(nameof(FieldCount), FieldCount);
 
-            _fields = ArrayPool<RowDescriptionField>.GetArray(FieldCount);
+            _fields = ArrayPool<ColumnDescription>.GetArray(FieldCount);
             var actualLength = 6;
             for (var i = 0; i < FieldCount; ++i)
             {
-                var field = RowDescriptionField.Create(ref state, ref bb);
+                var field = ColumnDescription.Create(ref state, ref bb);
                 _fields[i] = field;
                 actualLength += field.ComputedLength;
             }

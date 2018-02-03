@@ -101,7 +101,7 @@ namespace Lennox.AsyncPostgresClient.Tests.Protocol
 
         protected void AssertRowDescription(
             int fieldCount,
-            RowDescriptionField[] descriptions)
+            ColumnDescription[] descriptions)
         {
             var found = PostgresMessage.ReadMessage(
                 Buffer, ref Offset, ref Length,
