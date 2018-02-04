@@ -896,6 +896,7 @@ namespace Lennox.AsyncPostgresClient
                 switch (row.Length)
                 {
                     case -1:
+                        row.Length = 0;
                         row.IsNull = true;
                         row._data = EmptyArray<byte>.Value;
                         break;

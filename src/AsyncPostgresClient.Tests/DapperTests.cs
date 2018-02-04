@@ -40,12 +40,12 @@ namespace Lennox.AsyncPostgresClient.Tests
 
             using (var connection = await PostgresServerInformation.Open())
             using (var command = new PostgresCommand(
-                "SELECT 1, 2, 3, true, false, 4.6 as foobar", connection))
+                "SELECT 1, 2, 3, true, false, 4.6 as foobar, null", connection))
             {
                 var reader = await command.ExecuteReaderAsync(cancel);
 
                 Assert.IsTrue(await reader.ReadAsync(cancel));
-                Assert.AreEqual(6, reader.FieldCount);
+                Assert.AreEqual(7, reader.FieldCount);
                 Assert.AreEqual("1", reader[0]);
                 Assert.AreEqual("2", reader[1]);
                 Assert.AreEqual("3", reader[2]);

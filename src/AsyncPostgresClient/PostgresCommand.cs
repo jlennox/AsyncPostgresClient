@@ -9,7 +9,13 @@ namespace Lennox.AsyncPostgresClient
 {
     public class PostgresCommand : DbCommand
     {
-        public override string CommandText { get; set; }
+        // Backed by a field to avoid "Virtual member call in constructor."
+        public override string CommandText
+        {
+            get => _command;
+            set => _command = value;
+        }
+
         public override int CommandTimeout { get; set; }
         public override CommandType CommandType { get; set; }
         public override UpdateRowSource UpdatedRowSource { get; set; }
@@ -18,7 +24,7 @@ namespace Lennox.AsyncPostgresClient
         protected override DbTransaction DbTransaction { get; set; }
         public override bool DesignTimeVisible { get; set; }
 
-        private readonly string _command;
+        private string _command;
         private readonly PostgresDbConnectionBase _connection;
 
         public PostgresCommand(
@@ -69,7 +75,7 @@ namespace Lennox.AsyncPostgresClient
             bool async,
             CancellationToken cancellationToken)
         {
-            await _connection.Query(async, _command, cancellationToken)
+            await _connection.Query(async, CommandText, cancellationToken)
                 .ConfigureAwait(false);
 
             return 0;
@@ -99,7 +105,7 @@ namespace Lennox.AsyncPostgresClient
             CommandBehavior behavior,
             CancellationToken cancellationToken)
         {
-            await _connection.Query(async, _command, cancellationToken)
+            await _connection.Query(async, CommandText, cancellationToken)
                 .ConfigureAwait(false);
 
             var reader = new PostgresDbDataReader(

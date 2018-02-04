@@ -12,37 +12,54 @@ using Lennox.AsyncPostgresClient.Extension;
 
 namespace Lennox.AsyncPostgresClient
 {
+    // Reference source:
+    // https://github.com/dotnet/corefx/blob/master/src/System.Data.SqlClient/src/System/Data/SqlClient/SqlDataReader.cs
+    // https://msdn.microsoft.com/en-us/library/system.data.common.dbdatareader(v=vs.110).aspx
     public class PostgresDbDataReader : DbDataReader
     {
-        public override int FieldCount
-        {
-            get
-            {
-                if (_fieldCount == -1)
-                {
-                    throw new NotSupportedException(
-                        "Results have not been read.");
-                }
-
-                return _fieldCount;
-            }
-        }
-
-        public override object this[int ordinal] => RowDataString(ordinal);
+        public override object this[int ordinal] => GetValue(ordinal);
         public override object this[string name]
         {
             get
             {
                 var ordinal = ColumnByName(name, out var _);
 
-                return this[ordinal];
+                return GetValue(ordinal);
             }
         }
 
-        public override int RecordsAffected => _recordsAffected;
-        public override bool HasRows => _hasRows;
+        public override int FieldCount
+        {
+            get
+            {
+                CheckIsClosed();
+
+                return _fieldCount;
+            }
+        }
+
+        public override bool HasRows
+        {
+            get
+            {
+                CheckIsClosed();
+
+                return _hasRows;
+            }
+        }
+
+        public override int Depth
+        {
+            get
+            {
+                CheckIsClosed();
+
+                return _depth;
+            }
+        }
+
         public override bool IsClosed => _isClosed;
-        public override int Depth => _depth;
+        public override int RecordsAffected => _recordsAffected;
 
         private int _recordsAffected = 0;
         private bool _hasRows;
@@ -76,7 +93,7 @@ namespace Lennox.AsyncPostgresClient
         /// buffer size for the data being returned.</summary>
         private readonly bool _behaviorSequentialAccess;
         /// <summary>The query returns a single result set.</summary>
-        private readonly bool _behaviorSignalResult;
+        private readonly bool _behaviorSinglaResult;
         /// <summary>The query is expected to return a single row of the first
         /// result set. Execution of the query may affect the database state.
         /// Some .NET Framework data providers may, but are not required to,
@@ -95,7 +112,7 @@ namespace Lennox.AsyncPostgresClient
         private readonly bool _behaviorSingleRow;
         #endregion
 
-        private int _fieldCount = -1;
+        private int _fieldCount = 0;
         private DataRowMessage? _lastDataRowMessage;
 
         public PostgresDbDataReader(
@@ -115,7 +132,7 @@ namespace Lennox.AsyncPostgresClient
                 .HasFlag(CommandBehavior.SchemaOnly);
             _behaviorSequentialAccess = behavior
                 .HasFlag(CommandBehavior.SequentialAccess);
-            _behaviorSignalResult = behavior
+            _behaviorSinglaResult = behavior
                 .HasFlag(CommandBehavior.SingleResult);
             _behaviorSingleRow = behavior
                 .HasFlag(CommandBehavior.SingleRow);
@@ -219,7 +236,7 @@ namespace Lennox.AsyncPostgresClient
 
         public override object GetValue(int ordinal)
         {
-            throw new NotImplementedException();
+            return RowDataObject(ordinal);
         }
 
         public override int GetValues(object[] values)
@@ -242,13 +259,13 @@ namespace Lennox.AsyncPostgresClient
         public override bool NextResult()
         {
             _connection.CheckAsyncOnly();
-            throw new NotImplementedException();
+            return false;
         }
 
         public override Task<bool> NextResultAsync(
             CancellationToken cancellationToken)
         {
-            throw new NotImplementedException();
+            return TaskCache.False;
         }
 
         public override bool Read()
@@ -271,9 +288,13 @@ namespace Lennox.AsyncPostgresClient
         private async ValueTask<bool> Read(
             bool async, CancellationToken cancellationToken)
         {
+            CheckIsClosed();
+
             // https://www.postgresql.org/docs/10/static/protocol-flow.html#idm46428663987712
             while (true)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 var message = await _connection
                     .ReadNextMessage(async, cancellationToken)
                     .ConfigureAwait(false);
@@ -282,6 +303,13 @@ namespace Lennox.AsyncPostgresClient
                 {
                     case CommandCompleteMessage completedMessage:
                         _commandCompleted = true;
+
+                        if (_behaviorSinglaResult)
+                        {
+                            Close();
+                            return false;
+                        }
+
                         continue;
                     case CopyInResponseMessage copyInMessage:
                         break;
@@ -333,9 +361,22 @@ namespace Lennox.AsyncPostgresClient
 
         public override void Close()
         {
+            _isClosed = true;
             _descriptionMessage?.TryDispose();
             _lastDataRowMessage?.TryDispose();
             base.Close();
+        }
+
+        private object RowDataObject(int ordinal)
+        {
+            var row = DataRow(ordinal);
+
+            if (row.IsNull)
+            {
+                return DBNull.Value;
+            }
+
+            throw new InvalidCastException();
         }
 
         private string RowDataString(int ordinal)
@@ -382,6 +423,11 @@ namespace Lennox.AsyncPostgresClient
 
         private byte[] RowData(int ordinal)
         {
+            return DataRow(ordinal).Data;
+        }
+
+        private DataRow DataRow(int ordinal)
+        {
             if (ordinal > _fieldCount)
             {
                 throw new IndexOutOfRangeException(
@@ -393,7 +439,7 @@ namespace Lennox.AsyncPostgresClient
                 throw new InvalidOperationException();
             }
 
-            return RowDataUnchecked(ordinal);
+            return DataRowUnchecked(ordinal);
         }
 
         private int ColumnByName(string name, out ColumnDescription description)
@@ -425,9 +471,18 @@ namespace Lennox.AsyncPostgresClient
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private byte[] RowDataUnchecked(int ordinal)
+        private DataRow DataRowUnchecked(int ordinal)
         {
-            return _lastDataRowMessage.Value.Rows[ordinal].Data;
+            return _lastDataRowMessage.Value.Rows[ordinal];
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void CheckIsClosed()
+        {
+            if (IsClosed)
+            {
+                throw new InvalidOperationException();
+            }
         }
     }
 }
