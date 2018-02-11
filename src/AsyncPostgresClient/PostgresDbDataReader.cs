@@ -6,9 +6,9 @@ using System.Data.Common;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
-using Lennox.AsyncPostgresClient.BufferAccess;
 using Lennox.AsyncPostgresClient.Exceptions;
 using Lennox.AsyncPostgresClient.Extension;
+using Lennox.AsyncPostgresClient.PostgresTypes;
 
 namespace Lennox.AsyncPostgresClient
 {
@@ -67,6 +67,7 @@ namespace Lennox.AsyncPostgresClient
         private int _depth = 0;
 
         private readonly PostgresDbConnectionBase _connection;
+        private readonly PostgresCommand _command;
         private readonly CancellationToken _cancellationToken;
 
         #region CommandBehavior
@@ -113,15 +114,19 @@ namespace Lennox.AsyncPostgresClient
         #endregion
 
         private int _fieldCount = 0;
+        private RowDescriptionMessage? _descriptionMessage;
         private DataRowMessage? _lastDataRowMessage;
+        private bool _commandCompleted;
 
         public PostgresDbDataReader(
             CommandBehavior behavior,
             PostgresDbConnectionBase connection,
+            PostgresCommand command,
             CancellationToken cancellationToken)
         {
             _behavior = behavior;
             _connection = connection;
+            _command = command;
             _cancellationToken = cancellationToken;
 
             _behaviorCloseConnection = behavior
@@ -140,7 +145,9 @@ namespace Lennox.AsyncPostgresClient
 
         public override bool GetBoolean(int ordinal)
         {
-            return RowDataBoolean(ordinal);
+            var row = GetDataRow(ordinal);
+            return PostgresTypeConverter
+                .ForBool(row, _connection.ClientState);
         }
 
         public override byte GetByte(int ordinal)
@@ -179,13 +186,16 @@ namespace Lennox.AsyncPostgresClient
 
         public override decimal GetDecimal(int ordinal)
         {
-            return RowDataDecimal(ordinal);
+            var row = GetDataRow(ordinal);
+            return PostgresTypeConverter
+                .ForDecimal(row, _connection.ClientState);
         }
 
         public override double GetDouble(int ordinal)
         {
-            // TODO
-            return (double)RowDataDecimal(ordinal);
+            var row = GetDataRow(ordinal);
+            return (double)PostgresTypeConverter
+                .ForDecimal(row, _connection.ClientState);
         }
 
         public override Type GetFieldType(int ordinal)
@@ -195,28 +205,37 @@ namespace Lennox.AsyncPostgresClient
 
         public override float GetFloat(int ordinal)
         {
-            // TODO
-            return (float)RowDataDecimal(ordinal);
+            var row = GetDataRow(ordinal);
+            return PostgresTypeConverter
+                .ForFloat8(row, _connection.ClientState);
         }
 
         public override Guid GetGuid(int ordinal)
         {
-            throw new NotImplementedException();
+            var row = GetDataRow(ordinal);
+            return PostgresTypeConverter
+                .ForUuid(row, _connection.ClientState);
         }
 
         public override short GetInt16(int ordinal)
         {
-            return (short)RowDataInt(ordinal);
+            var row = GetDataRow(ordinal);
+            return PostgresTypeConverter
+                .ForInt2(row, _connection.ClientState);
         }
 
         public override int GetInt32(int ordinal)
         {
-            return RowDataInt(ordinal);
+            var row = GetDataRow(ordinal);
+            return PostgresTypeConverter
+                .ForInt4(row, _connection.ClientState);
         }
 
         public override long GetInt64(int ordinal)
         {
-            return RowDataLong(ordinal);
+            var row = GetDataRow(ordinal);
+            return PostgresTypeConverter
+                .ForInt8(row, _connection.ClientState);
         }
 
         public override string GetName(int ordinal)
@@ -231,7 +250,9 @@ namespace Lennox.AsyncPostgresClient
 
         public override string GetString(int ordinal)
         {
-            return RowDataString(ordinal);
+            var row = GetDataRow(ordinal);
+            return PostgresTypeConverter
+                .ForString(row, _connection.ClientState);
         }
 
         public override object GetValue(int ordinal)
@@ -281,11 +302,7 @@ namespace Lennox.AsyncPostgresClient
             return Read(true, cancellationToken).AsTask();
         }
 
-        private bool _commandCompleted;
-
-        private RowDescriptionMessage? _descriptionMessage;
-
-        private async ValueTask<bool> Read(
+        internal async ValueTask<bool> Read(
             bool async, CancellationToken cancellationToken)
         {
             CheckIsClosed();
@@ -369,64 +386,32 @@ namespace Lennox.AsyncPostgresClient
 
         private object RowDataObject(int ordinal)
         {
-            var row = DataRow(ordinal);
+            var row = GetDataRow(ordinal);
 
             if (row.IsNull)
             {
                 return DBNull.Value;
             }
 
-            throw new InvalidCastException();
-        }
-
-        private string RowDataString(int ordinal)
-        {
-            var data = RowData(ordinal);
-            return _connection.ServerEncoding.GetString(data);
-        }
-
-        private int RowDataInt(int ordinal)
-        {
-            var data = RowData(ordinal);
-            return NumericBuffer.AsciiToInt(data);
-        }
-
-        private long RowDataLong(int ordinal)
-        {
-            var data = RowData(ordinal);
-            return NumericBuffer.AsciiToLong(data);
-        }
-
-        private decimal RowDataDecimal(int ordinal)
-        {
-            var data = RowData(ordinal);
-            return NumericBuffer.AsciiToDecimal(data);
-        }
-
-        private bool RowDataBoolean(int ordinal)
-        {
-            var data = RowData(ordinal);
-
-            if (data.Length != 1)
+            if (!_descriptionMessage.HasValue)
             {
-                throw new ArgumentOutOfRangeException();
+                // TODO.
+                throw new InvalidOperationException();
             }
 
-            switch (data[0])
-            {
-                case (byte)'t': return true;
-                case (byte)'f': return false;
-            }
+            var field = _descriptionMessage.Value.Fields[ordinal];
+            var oid = field.DataTypeObjectId;
 
-            throw new ArgumentOutOfRangeException();
+            return _command.TypeCollection
+                .Convert(oid, row, _connection.ClientState);
         }
 
-        private byte[] RowData(int ordinal)
+        private DataRow GetDataRow(string name)
         {
-            return DataRow(ordinal).Data;
+            return GetDataRow(GetOrdinal(name));
         }
 
-        private DataRow DataRow(int ordinal)
+        private DataRow GetDataRow(int ordinal)
         {
             if (ordinal > _fieldCount)
             {
@@ -436,17 +421,18 @@ namespace Lennox.AsyncPostgresClient
 
             if (!_lastDataRowMessage.HasValue)
             {
+                // TODO.
                 throw new InvalidOperationException();
             }
 
-            return DataRowUnchecked(ordinal);
+            return GetDataRowUnchecked(ordinal);
         }
 
         private int ColumnByName(string name, out ColumnDescription description)
         {
-            // TODO
             if (!_descriptionMessage.HasValue)
             {
+                // TODO.
                 throw new InvalidOperationException();
             }
 
@@ -471,7 +457,7 @@ namespace Lennox.AsyncPostgresClient
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private DataRow DataRowUnchecked(int ordinal)
+        private DataRow GetDataRowUnchecked(int ordinal)
         {
             return _lastDataRowMessage.Value.Rows[ordinal];
         }

@@ -1736,9 +1736,8 @@ namespace Lennox.AsyncPostgresClient
                 ComputedLength = sLength + 18
             };
 
-            AssertMessageValue.Positive(
-                nameof(description.ColumnIndex),
-                description.ColumnIndex);
+            // ColumnIndex can be negative.
+            // TODO: Find out when/why.
 
             // DataTypeSize can be negative.
             // "Note that negative values denote variable-width types."

@@ -123,9 +123,39 @@ namespace Lennox.AsyncPostgresClient.BufferAccess
             return false;
         }
 
+        public static short AsciiToShort(byte[] data)
+        {
+            if (TryAsciiToInt(data, 0, 2, out var number))
+            {
+                return (short)number;
+            }
+
+            throw new ArgumentOutOfRangeException();
+        }
+
+        public static short AsciiToShort(byte[] data, int length)
+        {
+            if (TryAsciiToInt(data, 0, length, out var number))
+            {
+                return (short)number;
+            }
+
+            throw new ArgumentOutOfRangeException();
+        }
+
         public static int AsciiToInt(byte[] data)
         {
             if (TryAsciiToInt(data, 0, data.Length, out var number))
+            {
+                return number;
+            }
+
+            throw new ArgumentOutOfRangeException();
+        }
+
+        public static int AsciiToInt(byte[] data, int length)
+        {
+            if (TryAsciiToInt(data, 0, length, out var number))
             {
                 return number;
             }
@@ -165,7 +195,12 @@ namespace Lennox.AsyncPostgresClient.BufferAccess
             return sum;
         }
 
-        public static unsafe decimal AsciiToDecimal(byte[] data)
+        public static decimal AsciiToDecimal(byte[] data)
+        {
+            return AsciiToDecimal(data, data.Length);
+        }
+
+        public static unsafe decimal AsciiToDecimal(byte[] data, int length)
         {
             const byte period = (byte)'.';
 
@@ -173,7 +208,7 @@ namespace Lennox.AsyncPostgresClient.BufferAccess
 
             fixed (byte* pt = data)
             {
-                for (var i = 0; i < data.Length; ++i)
+                for (var i = 0; i < length; ++i)
                 {
                     if (pt[i] == period)
                     {
@@ -185,16 +220,16 @@ namespace Lennox.AsyncPostgresClient.BufferAccess
 
             if (periodPosition == -1)
             {
-                return AsciiToLong(data);
+                return AsciiToLong(data, 0, length);
             }
 
             var fractionStart = periodPosition + 1;
-            var fractionLength = data.Length - fractionStart;
+            var fractionLength = length - fractionStart;
 
             decimal whole = AsciiToLong(data, 0, periodPosition);
 
             // Catch unneeded trailing periods. "500."
-            if (fractionStart >= data.Length)
+            if (fractionStart >= length)
             {
                 return whole;
             }

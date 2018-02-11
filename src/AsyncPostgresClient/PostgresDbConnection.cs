@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Lennox.AsyncPostgresClient.Exceptions;
 using Lennox.AsyncPostgresClient.Extension;
 using Lennox.AsyncPostgresClient.Pool;
+using Lennox.AsyncPostgresClient.PostgresTypes;
 
 namespace Lennox.AsyncPostgresClient
 {
@@ -123,11 +124,11 @@ namespace Lennox.AsyncPostgresClient
 
         protected readonly PostgresConnectionString PostgresConnectionString;
         private PostgresReadState _readState = new PostgresReadState();
-        private PostgresClientState _clientState =
+        internal PostgresClientState ClientState =
             PostgresClientState.CreateDefault();
 
-        internal Encoding ClientEncoding => _clientState.ClientEncoding;
-        internal Encoding ServerEncoding => _clientState.ServerEncoding;
+        internal Encoding ClientEncoding => ClientState.ClientEncoding;
+        internal Encoding ServerEncoding => ClientState.ServerEncoding;
 
         private MemoryStream _writeBuffer;
         private byte[] _buffer;
@@ -266,7 +267,7 @@ namespace Lennox.AsyncPostgresClient
         private void WriteMessage<T>(T message)
             where T : IPostgresMessage
         {
-            message.Write(ref _clientState, _writeBuffer);
+            message.Write(ref ClientState, _writeBuffer);
         }
 
         private async Task FlushWrites(
@@ -312,7 +313,7 @@ namespace Lennox.AsyncPostgresClient
             {
                 case AuthenticationMessageType.MD5Password:
                     passwordMessage = PasswordMessage.CreateMd5(
-                        authenticationMessage, _clientState,
+                        authenticationMessage, ClientState,
                         PostgresConnectionString);
                     break;
                 default:
@@ -352,7 +353,7 @@ namespace Lennox.AsyncPostgresClient
             {
                 var foundMessage = PostgresMessage.ReadMessage(
                     _buffer, ref _bufferOffset, ref _bufferCount,
-                    ref _readState, ref _clientState, out message);
+                    ref _readState, ref ClientState, out message);
 
                 if (foundMessage)
                 {
@@ -423,6 +424,22 @@ namespace Lennox.AsyncPostgresClient
         protected override DbCommand CreateDbCommand()
         {
             return new PostgresCommand("", this);
+        }
+
+        private PostgresTypeCollection _typeCollection = null;
+
+        internal async Task<PostgresTypeCollection> GetTypeCollection(
+            bool async, CancellationToken cancellationToken)
+        {
+            if (_typeCollection != null)
+            {
+                return _typeCollection;
+            }
+
+            _typeCollection = await PostgresTypeCollection
+                .Create(async, this, cancellationToken).ConfigureAwait(false);
+
+            return _typeCollection;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

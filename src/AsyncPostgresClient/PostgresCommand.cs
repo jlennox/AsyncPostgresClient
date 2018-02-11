@@ -4,6 +4,7 @@ using System.Data.Common;
 using System.Threading;
 using System.Threading.Tasks;
 using Lennox.AsyncPostgresClient.Extension;
+using Lennox.AsyncPostgresClient.PostgresTypes;
 
 namespace Lennox.AsyncPostgresClient
 {
@@ -23,6 +24,9 @@ namespace Lennox.AsyncPostgresClient
         protected override DbParameterCollection DbParameterCollection { get; }
         protected override DbTransaction DbTransaction { get; set; }
         public override bool DesignTimeVisible { get; set; }
+
+        internal bool DoNotLoadTypeCollection { get; set; }
+        internal PostgresTypeCollection TypeCollection { get; private set; }
 
         private string _command;
         private readonly PostgresDbConnectionBase _connection;
@@ -100,16 +104,22 @@ namespace Lennox.AsyncPostgresClient
                 false, behavior, CancellationToken.None).AsTask();
         }
 
-        private async ValueTask<DbDataReader> ExecuteDbDataReader(
+        internal async ValueTask<DbDataReader> ExecuteDbDataReader(
             bool async,
             CommandBehavior behavior,
             CancellationToken cancellationToken)
         {
+            if (!DoNotLoadTypeCollection)
+            {
+                TypeCollection = await _connection.GetTypeCollection(
+                    async, cancellationToken).ConfigureAwait(false);
+            }
+
             await _connection.Query(async, CommandText, cancellationToken)
                 .ConfigureAwait(false);
 
             var reader = new PostgresDbDataReader(
-                behavior, _connection, cancellationToken);
+                behavior, _connection, this, cancellationToken);
 
             return reader;
         }
