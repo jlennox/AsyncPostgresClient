@@ -114,6 +114,10 @@ namespace Lennox.AsyncPostgresClient
         public override string DataSource { get; }
         public override string ServerVersion { get; }
 
+        // Used by tests only.
+        internal PostgresFormatCode QueryResultFormat { get; set; } =
+            PostgresFormatCode.Binary;
+
         public bool AsyncOnly { get; }
 
         public delegate void NoticeResponseEvent(
@@ -139,6 +143,14 @@ namespace Lennox.AsyncPostgresClient
         private readonly object _disposeSync = new object();
         private readonly CancellationTokenSource _cancel =
             new CancellationTokenSource();
+
+        private static readonly PostgresFormatCode[] _binaryFormatCode = new[] {
+            PostgresFormatCode.Binary
+        };
+
+        private static readonly PostgresFormatCode[] _textFormatCode = new[] {
+            PostgresFormatCode.Text
+        };
 
         protected PostgresDbConnectionBase(
             string connectionString,
@@ -296,10 +308,6 @@ namespace Lennox.AsyncPostgresClient
             }
         }
 
-        private static readonly PostgresFormatCode[] _binaryFormatCode = new[] {
-            PostgresFormatCode.Binary
-        };
-
         internal async Task Query(
             bool async, string query, CancellationToken cancellationToken)
         {
@@ -311,7 +319,10 @@ namespace Lennox.AsyncPostgresClient
             WriteMessage(new BindMessage {
                 PreparedStatementName = "",
                 ResultColumnFormatCodeCount = 1,
-                ResultColumnFormatCodes = _binaryFormatCode
+                ResultColumnFormatCodes =
+                    QueryResultFormat == PostgresFormatCode.Binary
+                        ? _binaryFormatCode
+                        : _textFormatCode
             });
 
             WriteMessage(new DescribeMessage {

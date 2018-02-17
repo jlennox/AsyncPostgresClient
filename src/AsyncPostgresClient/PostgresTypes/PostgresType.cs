@@ -353,7 +353,18 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
                 nameof(formatCode), formatCode,
                 "Unknown format code.");
         }
+
+        internal static void DemandDataLength(DataRow row, int length)
+        {
+            if (row.Data.Length < length || row.Length != length)
+            {
+                throw new ArgumentOutOfRangeException();
+            }
+        }
     }
+
+    // Information on encodings:
+    // https://github.com/scrive/hpqtypes/tree/master/libpqtypes/src
 
     // There's two code paths. IPostgresTypeConverter is to avoid the boxing
     // of converting the result to an object prematurely. The reason
@@ -413,7 +424,7 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
     internal class PostgresBinaryTypeConverter :
         IPostgresTypeConverter, IPostgresTypeBoxingConverter
     {
-        public static PostgresBinaryTypeConverter Default =
+        public static readonly PostgresBinaryTypeConverter Default =
             new PostgresBinaryTypeConverter();
 
         object IPostgresTypeBoxingConverter.ForBoolBoxing(
@@ -424,7 +435,15 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
 
         public bool ForBool(DataRow row, PostgresClientState state)
         {
-            throw new NotImplementedException();
+            PostgresTypeConverter.DemandDataLength(row, 1);
+
+            switch (row.Data[0])
+            {
+                case 0: return false;
+                case 1: return true;
+            }
+
+            throw new ArgumentOutOfRangeException();
         }
 
         object IPostgresTypeBoxingConverter.ForStringBoxing(
@@ -435,7 +454,7 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
 
         public string ForString(DataRow row, PostgresClientState state)
         {
-            throw new NotImplementedException();
+            return PostgresTextTypeConverter.Default.ForString(row, state);
         }
 
         object IPostgresTypeBoxingConverter.ForInt2Boxing(
@@ -446,7 +465,9 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
 
         public short ForInt2(DataRow row, PostgresClientState state)
         {
-            throw new NotImplementedException();
+            PostgresTypeConverter.DemandDataLength(row, 2);
+
+            return BinaryBuffer.ReadShortNetwork(row.Data, 0);
         }
 
         object IPostgresTypeBoxingConverter.ForInt4Boxing(
@@ -457,7 +478,9 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
 
         public int ForInt4(DataRow row, PostgresClientState state)
         {
-            throw new NotImplementedException();
+            PostgresTypeConverter.DemandDataLength(row, 4);
+
+            return BinaryBuffer.ReadIntNetwork(row.Data, 0);
         }
 
         object IPostgresTypeBoxingConverter.ForInt8Boxing(
@@ -468,7 +491,9 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
 
         public long ForInt8(DataRow row, PostgresClientState state)
         {
-            throw new NotImplementedException();
+            PostgresTypeConverter.DemandDataLength(row, 8);
+
+            return BinaryBuffer.ReadLongNetwork(row.Data, 0);
         }
 
         object IPostgresTypeBoxingConverter.ForMoneyBoxing(
@@ -535,7 +560,7 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
     internal class PostgresTextTypeConverter :
         IPostgresTypeConverter, IPostgresTypeBoxingConverter
     {
-        public static PostgresTextTypeConverter Default =
+        public static readonly PostgresTextTypeConverter Default =
             new PostgresTextTypeConverter();
 
         object IPostgresTypeBoxingConverter.ForBoolBoxing(
@@ -546,17 +571,12 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
 
         public bool ForBool(DataRow row, PostgresClientState state)
         {
-            if (row.Data.Length != 1)
-            {
-                throw new ArgumentOutOfRangeException();
-            }
+            PostgresTypeConverter.DemandDataLength(row, 1);
 
             switch (row.Data[0])
             {
-                case (byte)'t':
-                    return true;
-                case (byte)'f':
-                    return false;
+                case (byte)'f': return false;
+                case (byte)'t': return true;
             }
 
             throw new ArgumentOutOfRangeException();
