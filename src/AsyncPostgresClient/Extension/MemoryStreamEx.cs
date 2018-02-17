@@ -43,7 +43,8 @@ namespace Lennox.AsyncPostgresClient.Extension
             ms.Write(buffer, 0, 2);
         }
 
-        public static int WriteNetwork(this MemoryStream ms, short[] array)
+        public static int WriteNetwork(
+            this MemoryStream ms, short[] array, int length)
         {
             var buffer = InitializeBuffer();
 
@@ -52,16 +53,17 @@ namespace Lennox.AsyncPostgresClient.Extension
                 return 0;
             }
 
-            for (var i = 0; i < array.Length; ++i)
+            for (var i = 0; i < length; ++i)
             {
                 BinaryBuffer.WriteShortNetwork(buffer, 0, array[i]);
                 ms.Write(buffer, 0, 2);
             }
 
-            return array.Length * 2;
+            return length * 2;
         }
 
-        public static int WriteShortNetwork<T>(this MemoryStream ms, int[] array, int length)
+        public static int WriteShortNetwork<T>(
+            this MemoryStream ms, int[] array, int length)
         {
             if (array == null)
             {
@@ -79,7 +81,8 @@ namespace Lennox.AsyncPostgresClient.Extension
             return length * 2;
         }
 
-        public static int WriteNetwork(this MemoryStream ms, byte[] array, int length)
+        public static int WriteNetwork(
+            this MemoryStream ms, byte[] array, int length)
         {
             if (array == null)
             {
@@ -91,7 +94,8 @@ namespace Lennox.AsyncPostgresClient.Extension
             return length;
         }
 
-        public static int WriteNetwork(this MemoryStream ms, int[] array, int length)
+        public static int WriteNetwork(
+            this MemoryStream ms, int[] array, int length)
         {
             if (array == null)
             {
@@ -114,7 +118,7 @@ namespace Lennox.AsyncPostgresClient.Extension
         {
             var buffer = InitializeBuffer();
 
-            if (s == "")
+            if (string.IsNullOrEmpty(s))
             {
                 ms.WriteByte(0);
                 return 1;

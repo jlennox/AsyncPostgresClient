@@ -296,7 +296,38 @@ namespace Lennox.AsyncPostgresClient
             }
         }
 
+        private static readonly PostgresFormatCode[] _binaryFormatCode = new[] {
+            PostgresFormatCode.Binary
+        };
+
         internal async Task Query(
+            bool async, string query, CancellationToken cancellationToken)
+        {
+            // https://github.com/LuaDist/libpq/blob/4a90601e5d395da904b43116ffb3052e86bdc8ec/src/interfaces/libpq/fe-exec.c#L1365
+            WriteMessage(new ParseMessage {
+                Query = query
+            });
+
+            WriteMessage(new BindMessage {
+                PreparedStatementName = "",
+                ResultColumnFormatCodeCount = 1,
+                ResultColumnFormatCodes = _binaryFormatCode
+            });
+
+            WriteMessage(new DescribeMessage {
+                StatementTargetType = StatementTargetType.Portal
+            });
+
+            WriteMessage(new ExecuteMessage {
+            });
+
+            WriteMessage(new SyncMessage {
+            });
+
+            await FlushWrites(async, cancellationToken).ConfigureAwait(false);
+        }
+
+        internal async Task SimpleQuery(
             bool async, string query, CancellationToken cancellationToken)
         {
             WriteMessage(new QueryMessage {

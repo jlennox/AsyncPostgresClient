@@ -19,6 +19,7 @@ namespace Lennox.AsyncPostgresClient.Tests
             var actual = PostgresTypeConverter.Convert(
                 postgresTypeName.GetHashCode(),
                 row,
+                PostgresFormatCode.Text,
                 PostgresClientState.CreateDefault());
 
             Assert.IsTrue(actual is T);

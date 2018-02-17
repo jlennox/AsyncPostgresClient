@@ -514,6 +514,22 @@ namespace Lennox.AsyncPostgresClient
         }
     }
 
+    internal struct BindParameter
+    {
+        public int ParameterByteCount { get; set; }
+        public byte[] Parameters { get; set; }
+
+        public int Write(ref PostgresClientState state, MemoryStream ms)
+        {
+            AssertMessageValue.Positive(
+                nameof(ParameterByteCount),
+                ParameterByteCount);
+
+            ms.WriteNetwork(ParameterByteCount);
+            return ms.WriteNetwork(Parameters, ParameterByteCount) + 2;
+        }
+    }
+
     internal struct BindMessage : IPostgresMessage
     {
         public const byte MessageId = (byte)'B';
@@ -521,12 +537,11 @@ namespace Lennox.AsyncPostgresClient
         public string PortalName { get; set; }
         public string PreparedStatementName { get; set; }
         public short FormatCodeCount { get; set; }
-        public short[] FormatCodes { get; set; }
+        public PostgresFormatCode[] FormatCodes { get; set; } // short[]
         public short ParameterCount { get; set; }
-        public int ParameterByteCount { get; set; }
-        public byte[] Parameters { get; set; }
+        public BindParameter[] Parameters { get; set; }
         public short ResultColumnFormatCodeCount { get; set; }
-        public short[] ResultColumnFormatCodes { get; set; }
+        public PostgresFormatCode[] ResultColumnFormatCodes { get; set; } // short[]
 
         public void Read(ref PostgresClientState state, BinaryBuffer bb, int length)
         {
@@ -535,19 +550,39 @@ namespace Lennox.AsyncPostgresClient
 
         public void Write(ref PostgresClientState state, MemoryStream ms)
         {
+            AssertMessageValue.Positive(
+                nameof(FormatCodeCount),
+                FormatCodeCount);
+
+            AssertMessageValue.Positive(
+                nameof(ResultColumnFormatCodeCount),
+                ResultColumnFormatCodeCount);
+
             ms.WriteByte(MessageId);
 
-            var length = 4 + 2 + 2 + 4 + 2;
+            var length = 4 + 2 + 2 + 2;
             var lengthPos = LengthPlacehold.Start(ms);
             length += ms.WriteString(PortalName, state.ClientEncoding);
             length += ms.WriteString(PreparedStatementName, state.ClientEncoding);
             ms.WriteNetwork(FormatCodeCount);
-            length += ms.WriteNetwork(FormatCodes);
+            for (var i = 0; i < FormatCodeCount; ++i)
+            {
+                ms.WriteNetwork((short)FormatCodes[i]);
+                length += 2;
+            }
             ms.WriteNetwork(ParameterCount);
-            ms.WriteNetwork(ParameterByteCount);
-            length += ms.WriteNetwork(Parameters, ParameterByteCount);
+
+            for (var i = 0; i < ParameterCount; ++i)
+            {
+                length += Parameters[i].Write(ref state, ms);
+            }
+
             ms.WriteNetwork(ResultColumnFormatCodeCount);
-            length += ms.WriteNetwork(ResultColumnFormatCodes);
+            for (var i = 0; i < ResultColumnFormatCodeCount; ++i)
+            {
+                ms.WriteNetwork((short)ResultColumnFormatCodes[i]);
+                length += 2;
+            }
 
             lengthPos.WriteLength(length);
         }
@@ -557,12 +592,11 @@ namespace Lennox.AsyncPostgresClient
             string portalName,
             string preparedStatementName,
             short formatCodeCount,
-            short[] formatCodes,
+            PostgresFormatCode[] formatCodes,
             short parameterCount,
-            int parameterByteCount,
-            byte[] parameters,
+            BindParameter[] parameters,
             short resultColumnFormatCodeCount,
-            short[] resultColumnFormatCodes,
+            PostgresFormatCode[] resultColumnFormatCodes,
             ref PostgresClientState state, MemoryStream ms)
         {
             var message = new BindMessage {
@@ -571,7 +605,6 @@ namespace Lennox.AsyncPostgresClient
                 FormatCodeCount = formatCodeCount,
                 FormatCodes = formatCodes,
                 ParameterCount = parameterCount,
-                ParameterByteCount = parameterByteCount,
                 Parameters = parameters,
                 ResultColumnFormatCodeCount = resultColumnFormatCodeCount,
                 ResultColumnFormatCodes = resultColumnFormatCodes
@@ -1455,6 +1488,10 @@ namespace Lennox.AsyncPostgresClient
 
         public void Write(ref PostgresClientState state, MemoryStream ms)
         {
+            AssertMessageValue.Positive(
+                nameof(ParameterTypeCount),
+                ParameterTypeCount);
+
             ms.WriteByte(MessageId);
 
             var length = 6;
@@ -1819,6 +1856,10 @@ namespace Lennox.AsyncPostgresClient
 
         public void Write(ref PostgresClientState state, MemoryStream ms)
         {
+            AssertMessageValue.Positive(
+                nameof(MessageCount),
+                MessageCount);
+
             // No message id sent.
             var length = 9;
             var lengthPos = LengthPlacehold.Start(ms);

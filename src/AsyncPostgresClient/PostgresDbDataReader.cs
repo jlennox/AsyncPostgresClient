@@ -145,9 +145,11 @@ namespace Lennox.AsyncPostgresClient
 
         public override bool GetBoolean(int ordinal)
         {
-            var row = GetDataRow(ordinal);
-            return PostgresTypeConverter
-                .ForBool(row, _connection.ClientState);
+            var description = GetRowDescription(ordinal);
+            return PostgresTypeConverter.ForBool(
+                description.Row,
+                description.Column.FormatCode,
+                _connection.ClientState);
         }
 
         public override byte GetByte(int ordinal)
@@ -186,16 +188,20 @@ namespace Lennox.AsyncPostgresClient
 
         public override decimal GetDecimal(int ordinal)
         {
-            var row = GetDataRow(ordinal);
-            return PostgresTypeConverter
-                .ForDecimal(row, _connection.ClientState);
+            var description = GetRowDescription(ordinal);
+            return PostgresTypeConverter.ForDecimal(
+                description.Row,
+                description.Column.FormatCode,
+                _connection.ClientState);
         }
 
         public override double GetDouble(int ordinal)
         {
-            var row = GetDataRow(ordinal);
-            return (double)PostgresTypeConverter
-                .ForDecimal(row, _connection.ClientState);
+            var description = GetRowDescription(ordinal);
+            return (double)PostgresTypeConverter.ForDecimal(
+                description.Row,
+                description.Column.FormatCode,
+                _connection.ClientState);
         }
 
         public override Type GetFieldType(int ordinal)
@@ -205,37 +211,47 @@ namespace Lennox.AsyncPostgresClient
 
         public override float GetFloat(int ordinal)
         {
-            var row = GetDataRow(ordinal);
-            return PostgresTypeConverter
-                .ForFloat8(row, _connection.ClientState);
+            var description = GetRowDescription(ordinal);
+            return PostgresTypeConverter.ForFloat8(
+                description.Row,
+                description.Column.FormatCode,
+                _connection.ClientState);
         }
 
         public override Guid GetGuid(int ordinal)
         {
-            var row = GetDataRow(ordinal);
-            return PostgresTypeConverter
-                .ForUuid(row, _connection.ClientState);
+            var description = GetRowDescription(ordinal);
+            return PostgresTypeConverter.ForUuid(
+                description.Row,
+                description.Column.FormatCode,
+                _connection.ClientState);
         }
 
         public override short GetInt16(int ordinal)
         {
-            var row = GetDataRow(ordinal);
-            return PostgresTypeConverter
-                .ForInt2(row, _connection.ClientState);
+            var description = GetRowDescription(ordinal);
+            return PostgresTypeConverter.ForInt2(
+                description.Row,
+                description.Column.FormatCode,
+                _connection.ClientState);
         }
 
         public override int GetInt32(int ordinal)
         {
-            var row = GetDataRow(ordinal);
-            return PostgresTypeConverter
-                .ForInt4(row, _connection.ClientState);
+            var description = GetRowDescription(ordinal);
+            return PostgresTypeConverter.ForInt4(
+                description.Row,
+                description.Column.FormatCode,
+                _connection.ClientState);
         }
 
         public override long GetInt64(int ordinal)
         {
-            var row = GetDataRow(ordinal);
-            return PostgresTypeConverter
-                .ForInt8(row, _connection.ClientState);
+            var description = GetRowDescription(ordinal);
+            return PostgresTypeConverter.ForInt8(
+                description.Row,
+                description.Column.FormatCode,
+                _connection.ClientState);
         }
 
         public override string GetName(int ordinal)
@@ -250,14 +266,16 @@ namespace Lennox.AsyncPostgresClient
 
         public override string GetString(int ordinal)
         {
-            var row = GetDataRow(ordinal);
-            return PostgresTypeConverter
-                .ForString(row, _connection.ClientState);
+            var description = GetRowDescription(ordinal);
+            return PostgresTypeConverter.ForString(
+                description.Row,
+                description.Column.FormatCode,
+                _connection.ClientState);
         }
 
         public override object GetValue(int ordinal)
         {
-            return RowDataObject(ordinal);
+            return GetRowDataAsObject(ordinal);
         }
 
         public override int GetValues(object[] values)
@@ -318,6 +336,12 @@ namespace Lennox.AsyncPostgresClient
 
                 switch (message)
                 {
+                    case ParseCompleteMessage parseCompleteMessage:
+                        // TODO: Do something?
+                        continue;
+                    case BindCompleteMessage bindCompleteMessage:
+                        // TODO: Do something?
+                        continue;
                     case CommandCompleteMessage completedMessage:
                         _commandCompleted = true;
 
@@ -384,11 +408,11 @@ namespace Lennox.AsyncPostgresClient
             base.Close();
         }
 
-        private object RowDataObject(int ordinal)
+        private object GetRowDataAsObject(int ordinal)
         {
-            var row = GetDataRow(ordinal);
+            var description = GetRowDescription(ordinal);
 
-            if (row.IsNull)
+            if (description.Row.IsNull)
             {
                 return DBNull.Value;
             }
@@ -402,16 +426,25 @@ namespace Lennox.AsyncPostgresClient
             var field = _descriptionMessage.Value.Fields[ordinal];
             var oid = field.DataTypeObjectId;
 
-            return _command.TypeCollection
-                .Convert(oid, row, _connection.ClientState);
+            return _command.TypeCollection.Convert(
+                oid,
+                description.Row,
+                description.Column.FormatCode,
+                _connection.ClientState);
         }
 
-        private DataRow GetDataRow(string name)
+        struct RowDescription
         {
-            return GetDataRow(GetOrdinal(name));
+            public DataRow Row;
+            public ColumnDescription Column;
         }
 
-        private DataRow GetDataRow(int ordinal)
+        private RowDescription GetRowDescription(string name)
+        {
+            return GetRowDescription(GetOrdinal(name));
+        }
+
+        private RowDescription GetRowDescription(int ordinal)
         {
             if (ordinal > _fieldCount)
             {
@@ -425,7 +458,19 @@ namespace Lennox.AsyncPostgresClient
                 throw new InvalidOperationException();
             }
 
-            return GetDataRowUnchecked(ordinal);
+            if (!_descriptionMessage.HasValue)
+            {
+                // TODO.
+                throw new InvalidOperationException();
+            }
+
+            var row = _lastDataRowMessage.Value.Rows[ordinal];
+            var column = _descriptionMessage.Value.Fields[ordinal];
+
+            return new RowDescription {
+                Row = row,
+                Column = column
+            };
         }
 
         private int ColumnByName(string name, out ColumnDescription description)
@@ -454,12 +499,6 @@ namespace Lennox.AsyncPostgresClient
         private ColumnDescription GetColumnDescription(int ordinal)
         {
             throw new Exception();
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private DataRow GetDataRowUnchecked(int ordinal)
-        {
-            return _lastDataRowMessage.Value.Rows[ordinal];
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
