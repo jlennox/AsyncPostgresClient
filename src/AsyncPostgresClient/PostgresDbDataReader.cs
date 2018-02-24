@@ -146,7 +146,7 @@ namespace Lennox.AsyncPostgresClient
         public override bool GetBoolean(int ordinal)
         {
             var description = GetRowDescription(ordinal);
-            return PostgresTypeConverter.ForBool(
+            return PostgresBoolCodec.Default.Decode(
                 description.Row,
                 description.Column.FormatCode,
                 _connection.ClientState);
@@ -183,13 +183,17 @@ namespace Lennox.AsyncPostgresClient
 
         public override DateTime GetDateTime(int ordinal)
         {
-            throw new NotImplementedException();
+            var description = GetRowDescription(ordinal);
+            return PostgresDateTimeCodec.Default.Decode(
+                description.Row,
+                description.Column.FormatCode,
+                _connection.ClientState);
         }
 
         public override decimal GetDecimal(int ordinal)
         {
             var description = GetRowDescription(ordinal);
-            return PostgresTypeConverter.ForDecimal(
+            return PostgresDecimalCodec.Default.Decode(
                 description.Row,
                 description.Column.FormatCode,
                 _connection.ClientState);
@@ -198,7 +202,7 @@ namespace Lennox.AsyncPostgresClient
         public override double GetDouble(int ordinal)
         {
             var description = GetRowDescription(ordinal);
-            return (double)PostgresTypeConverter.ForDecimal(
+            return PostgresDoubleCodec.Default.Decode(
                 description.Row,
                 description.Column.FormatCode,
                 _connection.ClientState);
@@ -212,7 +216,7 @@ namespace Lennox.AsyncPostgresClient
         public override float GetFloat(int ordinal)
         {
             var description = GetRowDescription(ordinal);
-            return PostgresTypeConverter.ForFloat8(
+            return PostgresFloatCodec.Default.Decode(
                 description.Row,
                 description.Column.FormatCode,
                 _connection.ClientState);
@@ -221,7 +225,7 @@ namespace Lennox.AsyncPostgresClient
         public override Guid GetGuid(int ordinal)
         {
             var description = GetRowDescription(ordinal);
-            return PostgresTypeConverter.ForUuid(
+            return PostgresGuidCodec.Default.Decode(
                 description.Row,
                 description.Column.FormatCode,
                 _connection.ClientState);
@@ -230,7 +234,7 @@ namespace Lennox.AsyncPostgresClient
         public override short GetInt16(int ordinal)
         {
             var description = GetRowDescription(ordinal);
-            return PostgresTypeConverter.ForInt2(
+            return PostgresShortCodec.Default.Decode(
                 description.Row,
                 description.Column.FormatCode,
                 _connection.ClientState);
@@ -239,7 +243,7 @@ namespace Lennox.AsyncPostgresClient
         public override int GetInt32(int ordinal)
         {
             var description = GetRowDescription(ordinal);
-            return PostgresTypeConverter.ForInt4(
+            return PostgresIntCodec.Default.Decode(
                 description.Row,
                 description.Column.FormatCode,
                 _connection.ClientState);
@@ -248,7 +252,7 @@ namespace Lennox.AsyncPostgresClient
         public override long GetInt64(int ordinal)
         {
             var description = GetRowDescription(ordinal);
-            return PostgresTypeConverter.ForInt8(
+            return PostgresLongCodec.Default.Decode(
                 description.Row,
                 description.Column.FormatCode,
                 _connection.ClientState);
@@ -267,7 +271,7 @@ namespace Lennox.AsyncPostgresClient
         public override string GetString(int ordinal)
         {
             var description = GetRowDescription(ordinal);
-            return PostgresTypeConverter.ForString(
+            return PostgresStringCodec.Default.Decode(
                 description.Row,
                 description.Column.FormatCode,
                 _connection.ClientState);
@@ -285,26 +289,29 @@ namespace Lennox.AsyncPostgresClient
 
         public override bool IsDBNull(int ordinal)
         {
-            _connection.CheckAsyncOnly();
-            throw new NotImplementedException();
+            // TODO: Never really needs to be async?
+            // _connection.CheckAsyncOnly();
+            var description = GetRowDescription(ordinal);
+            return description.Row.IsNull;
         }
 
         public override Task<bool> IsDBNullAsync(
             int ordinal, CancellationToken cancellationToken)
         {
-            throw new NotImplementedException();
+            var description = GetRowDescription(ordinal);
+            return description.Row.IsNull ? TaskCache.True : TaskCache.False;
         }
 
         public override bool NextResult()
         {
             _connection.CheckAsyncOnly();
-            return false;
+            throw new NotImplementedException();
         }
 
         public override Task<bool> NextResultAsync(
             CancellationToken cancellationToken)
         {
-            return TaskCache.False;
+            throw new NotImplementedException();
         }
 
         public override bool Read()

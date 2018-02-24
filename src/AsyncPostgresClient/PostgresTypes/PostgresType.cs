@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text;
@@ -11,6 +12,9 @@ using Lennox.AsyncPostgresClient.Exceptions;
 
 namespace Lennox.AsyncPostgresClient.PostgresTypes
 {
+    // https://github.com/postgres/postgres/tree/master/src/backend/utils/adt
+    // select proname, prorettype::regtype from pg_proc where proname like '%recv';
+
     internal class PostgresTypeCollection
     {
         // https://www.postgresql.org/docs/9.2/static/catalog-pg-type.html
@@ -25,38 +29,15 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
 
         public PostgresType[] Types { get; }
 
-        private readonly Dictionary<int, PostgresTypeConverter> _oidTextLookup;
-        private readonly Dictionary<int, PostgresTypeConverter> _oidBinLookup;
+        private readonly Dictionary<int, PostgresTypeConverter> _oidCodecLookup;
 
         private PostgresTypeCollection(List<PostgresType> types)
         {
             Types = types.ToArray();
 
-            _oidTextLookup = types.ToDictionary(
+            _oidCodecLookup = types.ToDictionary(
                 t => t.Oid,
-                t => PostgresTypeConverter.ConverterByName(
-                    PostgresFormatCode.Text, t.Name));
-
-            _oidBinLookup = types.ToDictionary(
-                t => t.Oid,
-                t => PostgresTypeConverter.ConverterByName(
-                    PostgresFormatCode.Binary, t.Name));
-        }
-
-        private Dictionary<int, PostgresTypeConverter> GetLookup(
-            PostgresFormatCode formatCode)
-        {
-            switch (formatCode)
-            {
-                case PostgresFormatCode.Text:
-                    return _oidTextLookup;
-                case PostgresFormatCode.Binary:
-                    return _oidBinLookup;
-                default:
-                    throw new ArgumentOutOfRangeException(
-                        nameof(formatCode), formatCode,
-                        "Unknown format code.");
-            }
+                t => PostgresTypeConverter.ConverterByName(t.Name));
         }
 
         internal static async ValueTask<PostgresTypeCollection> Create(
@@ -99,21 +80,31 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
             PostgresFormatCode formatCode,
             PostgresClientState state)
         {
-            var lookup = GetLookup(formatCode);
-
-            if (lookup.TryGetValue(oid, out var typeConverter))
+            if (!_oidCodecLookup.TryGetValue(oid, out var typeConverter))
             {
-                if (typeConverter.Converter == null)
-                {
-                    throw new NotImplementedException(
-                        $"Convertion of type '{typeConverter.Name}' is not supported.");
-                }
-
-                return typeConverter.Converter(row, state);
+                // TODO
+                throw new InvalidOperationException("Unknown oid " + oid);
             }
 
-            // TODO
-            throw new InvalidOperationException("Unknown oid " + oid);
+            var codec = typeConverter.Codec;
+
+            if (codec == null)
+            {
+                throw new NotImplementedException(
+                    $"Convertion of type '{typeConverter.Name}' is not supported.");
+            }
+
+            switch (formatCode)
+            {
+                case PostgresFormatCode.Text:
+                    return codec.DecodeTextObject(row, state);
+                case PostgresFormatCode.Binary:
+                    return codec.DecodeBinaryObject(row, state);
+            }
+
+            throw new ArgumentOutOfRangeException(
+                nameof(formatCode), formatCode,
+                "Unknown format code.");
         }
     }
 
@@ -135,29 +126,51 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
         private int _nameHashCode;
     }
 
-    [AttributeUsage(AttributeTargets.Method)]
+    [AttributeUsage(AttributeTargets.Method | AttributeTargets.Class)]
     internal class PostgresTypeConverterMethodAttribute : Attribute
     {
-        public string PostgresTypeName { get; }
+        public string[] PostgresTypeNames { get; }
 
-        public PostgresTypeConverterMethodAttribute(string postgresTypeName)
+        public PostgresTypeConverterMethodAttribute(params string[] postgresTypeNames)
         {
-            PostgresTypeName = postgresTypeName;
+            PostgresTypeNames = postgresTypeNames;
         }
     }
 
     internal static class PostgresTypeNames
     {
-        internal const string Bool = "bool";
-        internal const string Text = "text";
-        internal const string Int2 = "int2";
-        internal const string Int4 = "int4";
-        internal const string Int8 = "int8";
-        internal const string Money = "money";
-        internal const string Numeric = "numeric";
-        internal const string Float4 = "float4";
-        internal const string Float8 = "float8";
-        internal const string Uuid = "uuid";
+        public const string Bool = "bool";
+        public const string Text = "text";
+        public const string Int2 = "int2";
+        public const string Int4 = "int4";
+        public const string Int8 = "int8";
+        public const string Money = "money";
+        public const string Numeric = "numeric";
+        public const string Float4 = "float4";
+        public const string Float8 = "float8";
+        public const string Uuid = "uuid";
+        public const string Date = "date";
+        public const string Timestamp = "timestamp";
+        public const string Int2Vector = "int2vector";
+        public const string Byte = "bytea";
+        public const string Xml = "xml";
+        public const string Json = "json";
+        public const string Smgr = "smgr";
+        public const string Point = "point";
+        public const string Path = "path";
+        public const string Box = "box";
+        public const string Polygon = "polygon";
+        public const string Line = "line";
+        public const string AbsoluteTime = "abstime";
+        public const string RelativeTime = "reltime";
+        public const string Interval = "interval";
+        public const string Circle = "circle";
+        public const string MacAddress = "macaddr";
+        public const string Bpchar = "bpchar";
+        public const string VarChar = "varchar";
+        public const string Timezone = "timetz";
+        public const string Bit = "bit";
+        public const string JsonB = "jsonb";
     }
 
     internal struct PostgresTypeConverter
@@ -166,31 +179,13 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
             DataRow row, PostgresClientState state);
 
         public string Name { get; set; }
-        public ConvertDelegate Converter { get; set; }
+        public IPostgresTypeCodec Codec { get; set; }
 
-        private static readonly Dictionary<int, ConvertDelegate> _textLookup;
-        private static readonly Dictionary<int, ConvertDelegate> _binLookup;
+        private static readonly Dictionary<int, IPostgresTypeCodec> _codecLookup;
 
         static PostgresTypeConverter()
         {
-            _textLookup = CreateLookup(PostgresTextTypeConverter.Default);
-            _binLookup = CreateLookup(PostgresBinaryTypeConverter.Default);
-        }
-
-        private static Dictionary<int, ConvertDelegate> GetLookup(
-            PostgresFormatCode formatCode)
-        {
-            switch (formatCode)
-            {
-                case PostgresFormatCode.Text:
-                    return _textLookup;
-                case PostgresFormatCode.Binary:
-                    return _binLookup;
-                default:
-                    throw new ArgumentOutOfRangeException(
-                        nameof(formatCode), formatCode,
-                        "Unknown format code.");
-            }
+            _codecLookup = CreateLookup();
         }
 
         public static object Convert(
@@ -204,154 +199,60 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
                 return DBNull.Value;
             }
 
-            var lookup = GetLookup(formatCode);
-
-            if (lookup.TryGetValue(typeNameHash, out var converter))
+            if (!_codecLookup.TryGetValue(typeNameHash, out var codec))
             {
-                return converter(row, state);
+                throw new ArgumentOutOfRangeException(
+                    nameof(typeNameHash), typeNameHash,
+                    "Type does not have a converter.");
+            }
+
+            switch (formatCode)
+            {
+                case PostgresFormatCode.Text:
+                    return codec.DecodeTextObject(row, state);
+                case PostgresFormatCode.Binary:
+                    return codec.DecodeBinaryObject(row, state);
             }
 
             throw new ArgumentOutOfRangeException(
-                nameof(typeNameHash), typeNameHash,
-                "Type does not have a converter.");
+                nameof(formatCode), formatCode,
+                "Unknown format code.");
         }
 
         public static PostgresTypeConverter ConverterByName(
-            PostgresFormatCode formatCode,
             string postgresTypeName)
         {
             var typeHash = postgresTypeName.GetHashCode();
 
-            var lookup = GetLookup(formatCode);
-            lookup.TryGetValue(typeHash, out var converter);
+            _codecLookup.TryGetValue(typeHash, out var codec);
 
             return new PostgresTypeConverter {
                 Name = postgresTypeName,
-                Converter = converter
+                Codec = codec
             };
         }
 
-        private static Dictionary<int, ConvertDelegate> CreateLookup(
-            IPostgresTypeBoxingConverter target)
+        private static Dictionary<int, IPostgresTypeCodec> CreateLookup()
         {
-            // This could be a lot cleaner.
-            var convension = typeof(IPostgresTypeBoxingConverter).GetMethods()
-                .Where(t => t.ReturnType == typeof(object))
+            var assembly = typeof(PostgresTypeConverterMethodAttribute).Assembly;
+
+            return assembly.GetTypes()
+                .Where(t => t.IsClass)
                 .Select(t => new {
-                    Method = t,
-                    Attribute = t.GetCustomAttribute<
-                        PostgresTypeConverterMethodAttribute>()
+                    TypeAttribute = t.GetCustomAttribute<
+                        PostgresTypeConverterMethodAttribute>(),
+                    Type = t
                 })
-                .Where(t => t.Attribute != null)
+                .Where(t => t.TypeAttribute != null)
+                .SelectMany(t => t.TypeAttribute.PostgresTypeNames
+                    .Select(q => new {
+                        NameHash = q.GetHashCode(),
+                        Type = (IPostgresTypeCodec)Activator
+                            .CreateInstance(t.Type)
+                    }))
                 .ToDictionary(
-                    t => t.Method.Name,
-                    t => t.Attribute.PostgresTypeName);
-
-            var targetType = target.GetType();
-            const BindingFlags methodBinding =
-                BindingFlags.Instance | BindingFlags.NonPublic;
-
-            return convension
-                .ToDictionary(
-                    t => convension[t.Key].GetHashCode(),
-                    t =>
-                    {
-                        var fullyQualifiedMethodName =
-                            $"{typeof(IPostgresTypeBoxingConverter).FullName}.{t.Key}";
-
-                        return Delegate.CreateDelegate(
-                            typeof(ConvertDelegate),
-                            target,
-                            targetType.GetMethod(
-                                fullyQualifiedMethodName,
-                                methodBinding)) as ConvertDelegate;
-                    });
-        }
-
-        private static IPostgresTypeConverter GetCovnerter(
-            PostgresFormatCode formatCode)
-        {
-            switch (formatCode)
-            {
-                case PostgresFormatCode.Binary:
-                    return PostgresBinaryTypeConverter.Default;
-                case PostgresFormatCode.Text:
-                    return PostgresTextTypeConverter.Default;
-            }
-
-            BadFormatCode(formatCode);
-            throw new UnreachableCodeException();
-        }
-
-        public static bool ForBool(
-            DataRow row,
-            PostgresFormatCode formatCode,
-            PostgresClientState state)
-        {
-            return GetCovnerter(formatCode).ForBool(row, state);
-        }
-
-        public static string ForString(
-            DataRow row,
-            PostgresFormatCode formatCode,
-            PostgresClientState state)
-        {
-            return GetCovnerter(formatCode).ForString(row, state);
-        }
-
-        public static short ForInt2(
-            DataRow row,
-            PostgresFormatCode formatCode,
-            PostgresClientState state)
-        {
-            return GetCovnerter(formatCode).ForInt2(row, state);
-        }
-
-        public static int ForInt4(
-            DataRow row,
-            PostgresFormatCode formatCode,
-            PostgresClientState state)
-        {
-            return GetCovnerter(formatCode).ForInt4(row, state);
-        }
-
-        public static long ForInt8(
-            DataRow row,
-            PostgresFormatCode formatCode,
-            PostgresClientState state)
-        {
-            return GetCovnerter(formatCode).ForInt8(row, state);
-        }
-
-        public static decimal ForDecimal(
-            DataRow row,
-            PostgresFormatCode formatCode,
-            PostgresClientState state)
-        {
-            return GetCovnerter(formatCode).ForDecimal(row, state);
-        }
-
-        public static float ForFloat8(
-            DataRow row,
-            PostgresFormatCode formatCode,
-            PostgresClientState state)
-        {
-            return GetCovnerter(formatCode).ForFloat8(row, state);
-        }
-
-        public static Guid ForUuid(
-            DataRow row,
-            PostgresFormatCode formatCode,
-            PostgresClientState state)
-        {
-            return GetCovnerter(formatCode).ForUuid(row, state);
-        }
-
-        private static void BadFormatCode(PostgresFormatCode formatCode)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(formatCode), formatCode,
-                "Unknown format code.");
+                    t => t.NameHash,
+                    t => t.Type);
         }
 
         internal static void DemandDataLength(DataRow row, int length)
@@ -366,331 +267,99 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
     // Information on encodings:
     // https://github.com/scrive/hpqtypes/tree/master/libpqtypes/src
 
-    // There's two code paths. IPostgresTypeConverter is to avoid the boxing
-    // of converting the result to an object prematurely. The reason
-    // IPostgresTypeBoxingConverter is specific is to allow creation of a
-    // delegate. The delegate is much faster than using MethodInfo based
-    // invoke, but still slower than what should ultimately be the solution --
-    // IPostgresTypeBoxingConverter is desolved and has automatic IL generated.
-    internal interface IPostgresTypeConverter
+    internal static class PostgresDateTime
     {
-        [PostgresTypeConverterMethod(PostgresTypeNames.Bool)]
-        bool ForBool(DataRow row, PostgresClientState state);
-        [PostgresTypeConverterMethod(PostgresTypeNames.Text)]
-        string ForString(DataRow row, PostgresClientState state);
-        [PostgresTypeConverterMethod(PostgresTypeNames.Int2)]
-        short ForInt2(DataRow row, PostgresClientState state);
-        [PostgresTypeConverterMethod(PostgresTypeNames.Int4)]
-        int ForInt4(DataRow row, PostgresClientState state);
-        [PostgresTypeConverterMethod(PostgresTypeNames.Int8)]
-        long ForInt8(DataRow row, PostgresClientState state);
-        [PostgresTypeConverterMethod(PostgresTypeNames.Money)]
-        decimal ForMoney(DataRow row, PostgresClientState state);
-        [PostgresTypeConverterMethod(PostgresTypeNames.Numeric)]
-        decimal ForNumeric(DataRow row, PostgresClientState state);
-        decimal ForDecimal(DataRow row, PostgresClientState state);
-        [PostgresTypeConverterMethod(PostgresTypeNames.Float4)]
-        float ForFloat4(DataRow row, PostgresClientState state);
-        [PostgresTypeConverterMethod(PostgresTypeNames.Float8)]
-        float ForFloat8(DataRow row, PostgresClientState state);
-        [PostgresTypeConverterMethod(PostgresTypeNames.Uuid)]
-        Guid ForUuid(DataRow row, PostgresClientState state);
-    }
+        // https://doxygen.postgresql.org/datatype_2timestamp_8h_source.html#l00163
+        public const int JulianMinYear = -4713;
+        public const int JulianMinMonth = 11;
+        public const int JulianMinDay = 24;
+        public const int JulianMaxYear = 5874898;
+        public const int JulianMaxMonth = 6;
+        public const int JulianMaxDay = 3;
+        public const int UnixEpochJdate = 2440588;
+        public const int PostgresEpochJdate = 2451545;
+        public const int DateTimeMinJulian = 0;
+        public const int DateTimeMaxJulian = 2147483494;
+        public const int TimestampMaxJulian = 109203528;
+        public const long TimestampMin = -211813488000000000L;
+        public const long TimestampMax = 9223371331200000000L;
 
-    internal interface IPostgresTypeBoxingConverter
-    {
-        [PostgresTypeConverterMethod(PostgresTypeNames.Bool)]
-        object ForBoolBoxing(DataRow row, PostgresClientState state);
-        [PostgresTypeConverterMethod(PostgresTypeNames.Text)]
-        object ForStringBoxing(DataRow row, PostgresClientState state);
-        [PostgresTypeConverterMethod(PostgresTypeNames.Int2)]
-        object ForInt2Boxing(DataRow row, PostgresClientState state);
-        [PostgresTypeConverterMethod(PostgresTypeNames.Int4)]
-        object ForInt4Boxing(DataRow row, PostgresClientState state);
-        [PostgresTypeConverterMethod(PostgresTypeNames.Int8)]
-        object ForInt8Boxing(DataRow row, PostgresClientState state);
-        [PostgresTypeConverterMethod(PostgresTypeNames.Money)]
-        object ForMoneyBoxing(DataRow row, PostgresClientState state);
-        [PostgresTypeConverterMethod(PostgresTypeNames.Numeric)]
-        object ForNumericBoxing(DataRow row, PostgresClientState state);
-        [PostgresTypeConverterMethod(PostgresTypeNames.Float4)]
-        object ForFloat4Boxing(DataRow row, PostgresClientState state);
-        [PostgresTypeConverterMethod(PostgresTypeNames.Float8)]
-        object ForFloat8Boxing(DataRow row, PostgresClientState state);
-        [PostgresTypeConverterMethod(PostgresTypeNames.Uuid)]
-        object ForUuidBoxing(DataRow row, PostgresClientState state);
-    }
-
-    internal class PostgresBinaryTypeConverter :
-        IPostgresTypeConverter, IPostgresTypeBoxingConverter
-    {
-        public static readonly PostgresBinaryTypeConverter Default =
-            new PostgresBinaryTypeConverter();
-
-        object IPostgresTypeBoxingConverter.ForBoolBoxing(
-            DataRow row, PostgresClientState state)
+        // https://github.com/scrive/hpqtypes/blob/master/libpqtypes/src/datetime.c#L1021
+        public static DateTime FromJulian(int jd)
         {
-            return ForBool(row, state);
-        }
+            var julian = jd;
+            julian += 32044;
+            var quad = julian / 146097;
+            var extra = (julian - quad * 146097) * 4 + 3;
+            julian += 60 + quad * 3 + extra / 146097;
+            quad = julian / 1461;
+            julian -= quad * 1461;
+            var y = julian * 4 / 1461;
+            julian = ((y != 0) ? ((julian + 305) % 365) : ((julian + 306) % 366))
+                + 123;
+            y += quad * 4;
+            var year = y - 4800;
+            quad = julian * 2141 / 65536;
+            var day = julian - 7834 * quad / 256;
+            var month = (quad + 10) % 12 + 1;
 
-        public bool ForBool(DataRow row, PostgresClientState state)
-        {
-            PostgresTypeConverter.DemandDataLength(row, 1);
-
-            switch (row.Data[0])
-            {
-                case 0: return false;
-                case 1: return true;
-            }
-
-            throw new ArgumentOutOfRangeException();
-        }
-
-        object IPostgresTypeBoxingConverter.ForStringBoxing(
-            DataRow row, PostgresClientState state)
-        {
-            return ForString(row, state);
-        }
-
-        public string ForString(DataRow row, PostgresClientState state)
-        {
-            return PostgresTextTypeConverter.Default.ForString(row, state);
-        }
-
-        object IPostgresTypeBoxingConverter.ForInt2Boxing(
-            DataRow row, PostgresClientState state)
-        {
-            return ForInt2(row, state);
-        }
-
-        public short ForInt2(DataRow row, PostgresClientState state)
-        {
-            PostgresTypeConverter.DemandDataLength(row, 2);
-
-            return BinaryBuffer.ReadShortNetwork(row.Data, 0);
-        }
-
-        object IPostgresTypeBoxingConverter.ForInt4Boxing(
-            DataRow row, PostgresClientState state)
-        {
-            return ForInt4(row, state);
-        }
-
-        public int ForInt4(DataRow row, PostgresClientState state)
-        {
-            PostgresTypeConverter.DemandDataLength(row, 4);
-
-            return BinaryBuffer.ReadIntNetwork(row.Data, 0);
-        }
-
-        object IPostgresTypeBoxingConverter.ForInt8Boxing(
-            DataRow row, PostgresClientState state)
-        {
-            return ForInt8(row, state);
-        }
-
-        public long ForInt8(DataRow row, PostgresClientState state)
-        {
-            PostgresTypeConverter.DemandDataLength(row, 8);
-
-            return BinaryBuffer.ReadLongNetwork(row.Data, 0);
-        }
-
-        object IPostgresTypeBoxingConverter.ForMoneyBoxing(
-            DataRow row, PostgresClientState state)
-        {
-            return ForMoney(row, state);
-        }
-
-        public decimal ForMoney(DataRow row, PostgresClientState state)
-        {
-            throw new NotImplementedException();
-        }
-
-        object IPostgresTypeBoxingConverter.ForNumericBoxing(
-            DataRow row, PostgresClientState state)
-        {
-            return ForNumeric(row, state);
-        }
-
-        public decimal ForNumeric(DataRow row, PostgresClientState state)
-        {
-            throw new NotImplementedException();
-        }
-
-        public decimal ForDecimal(DataRow row, PostgresClientState state)
-        {
-            throw new NotImplementedException();
-        }
-
-        object IPostgresTypeBoxingConverter.ForFloat4Boxing(
-            DataRow row, PostgresClientState state)
-        {
-            return ForFloat4(row, state);
-        }
-
-        public float ForFloat4(DataRow row, PostgresClientState state)
-        {
-            throw new NotImplementedException();
-        }
-
-        object IPostgresTypeBoxingConverter.ForFloat8Boxing(
-            DataRow row, PostgresClientState state)
-        {
-            return ForFloat8(row, state);
-        }
-
-        public float ForFloat8(DataRow row, PostgresClientState state)
-        {
-            throw new NotImplementedException();
-        }
-
-        object IPostgresTypeBoxingConverter.ForUuidBoxing(
-            DataRow row, PostgresClientState state)
-        {
-            return ForUuid(row, state);
-        }
-
-        public Guid ForUuid(DataRow row, PostgresClientState state)
-        {
-            throw new NotImplementedException();
+            return new DateTime(year, month, day, 0, 0, 0, 0, DateTimeKind.Utc);
         }
     }
 
-    internal class PostgresTextTypeConverter :
-        IPostgresTypeConverter, IPostgresTypeBoxingConverter
+    internal class PostgresBinaryTypeConverter
     {
-        public static readonly PostgresTextTypeConverter Default =
-            new PostgresTextTypeConverter();
-
-        object IPostgresTypeBoxingConverter.ForBoolBoxing(
-            DataRow row, PostgresClientState state)
+        public DateTime ForTimestamp(DataRow row, PostgresClientState state)
         {
-            return ForBool(row, state);
-        }
+            /*const int secondsPerDay = 86400;
+            const int secondsPerHour = 3600;
+            const int secondsPerMinute = 60;
 
-        public bool ForBool(DataRow row, PostgresClientState state)
-        {
-            PostgresTypeConverter.DemandDataLength(row, 1);
+            var aslong = ForInt8(row, state);
+            double asdouble;
 
-            switch (row.Data[0])
+            int Modulo(ref double t, int u)
             {
-                case (byte)'f': return false;
-                case (byte)'t': return true;
+                var q = t < 0
+                    ? Math.Ceiling(t / u)
+                    : Math.Floor(t / u);
+
+                if (q != 0)
+                {
+                    t -= Math.Round(q * u, 0);
+                }
+
+                return (int)q;
             }
 
-            throw new ArgumentOutOfRangeException();
-        }
-
-        object IPostgresTypeBoxingConverter.ForStringBoxing(
-            DataRow row, PostgresClientState state)
-        {
-            return ForString(row, state);
-        }
-
-        public string ForString(DataRow row, PostgresClientState state)
-        {
-            if (row.Data.Length == 0)
+            double Timeround(double j)
             {
-                return "";
+                const double timePrecInv = 10000000000.0;
+                return Math.Round(j * timePrecInv, 0) / timePrecInv;
             }
 
-            return state.ServerEncoding.GetString(row.Data, 0, row.Length);
-        }
+            if (state.IntegerDatetimes)
+            {
+                asdouble = aslong / (double)1000000;
+            }
+            else
+            {
+                throw new NotSupportedException(
+                    "Only integer datetimes are supported.");
+            }
 
-        object IPostgresTypeBoxingConverter.ForInt2Boxing(
-            DataRow row, PostgresClientState state)
-        {
-            return ForInt2(row, state);
-        }
+            var rem = asdouble;
+            var hour = Modulo(ref rem, secondsPerHour);
+            var minutes = Modulo(ref rem, secondsPerMinute);
+            var seconds = Modulo(ref rem, 1);
+            rem = Timeround(rem);
 
-        public short ForInt2(DataRow row, PostgresClientState state)
-        {
-            return NumericBuffer.AsciiToShort(row.Data, row.Length);
-        }
+            // There's a weird goto here that should logically infinite loop?
 
-        object IPostgresTypeBoxingConverter.ForInt4Boxing(
-            DataRow row, PostgresClientState state)
-        {
-            return ForInt4(row, state);
-        }
+            var millisec = rem * 1000;
 
-        public int ForInt4(DataRow row, PostgresClientState state)
-        {
-            return NumericBuffer.AsciiToInt(row.Data, row.Length);
-        }
-
-        object IPostgresTypeBoxingConverter.ForInt8Boxing(
-            DataRow row, PostgresClientState state)
-        {
-            return ForInt8(row, state);
-        }
-
-        public long ForInt8(DataRow row, PostgresClientState state)
-        {
-            return NumericBuffer.AsciiToLong(row.Data, 0, row.Length);
-        }
-
-        object IPostgresTypeBoxingConverter.ForMoneyBoxing(
-            DataRow row, PostgresClientState state)
-        {
-            return ForMoney(row, state);
-        }
-
-        public decimal ForMoney(DataRow row, PostgresClientState state)
-        {
-            return NumericBuffer.AsciiToDecimal(row.Data, row.Length);
-        }
-
-        object IPostgresTypeBoxingConverter.ForNumericBoxing(
-            DataRow row, PostgresClientState state)
-        {
-            return ForNumeric(row, state);
-        }
-
-        public decimal ForNumeric(DataRow row, PostgresClientState state)
-        {
-            return NumericBuffer.AsciiToDecimal(row.Data, row.Length);
-        }
-
-        public decimal ForDecimal(DataRow row, PostgresClientState state)
-        {
-            return NumericBuffer.AsciiToDecimal(row.Data, row.Length);
-        }
-
-        object IPostgresTypeBoxingConverter.ForFloat4Boxing(
-            DataRow row, PostgresClientState state)
-        {
-            return ForFloat4(row, state);
-        }
-
-        public float ForFloat4(DataRow row, PostgresClientState state)
-        {
-            return (float)NumericBuffer.AsciiToDecimal(row.Data, row.Length);
-        }
-
-        object IPostgresTypeBoxingConverter.ForFloat8Boxing(
-            DataRow row, PostgresClientState state)
-        {
-            return ForFloat8(row, state);
-        }
-
-        public float ForFloat8(DataRow row, PostgresClientState state)
-        {
-            return (float)NumericBuffer.AsciiToDecimal(row.Data, row.Length);
-        }
-
-        object IPostgresTypeBoxingConverter.ForUuidBoxing(
-            DataRow row, PostgresClientState state)
-        {
-            return ForUuid(row, state);
-        }
-
-        public Guid ForUuid(DataRow row, PostgresClientState state)
-        {
-            // TODO: Get rid of the string allocation here.
-            var guidString = ForString(row, state);
-            return new Guid(guidString);
+            return new TimeSpan(0, hour, minutes, seconds, (int)millisec);*/
+            throw new NotImplementedException();
         }
     }
 }

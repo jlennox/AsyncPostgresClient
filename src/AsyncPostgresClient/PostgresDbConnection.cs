@@ -410,6 +410,7 @@ namespace Lennox.AsyncPostgresClient
                                 this, noticeMessage.PublicCloneNotices());
                             continue;
                         case ParameterStatusMessage paramMessage:
+                            ClientState.SetParameter(paramMessage);
                             continue;
                     }
                 }

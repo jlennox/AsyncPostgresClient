@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Dapper;
+using Lennox.AsyncPostgresClient.Diagnostic;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Lennox.AsyncPostgresClient.Tests
@@ -100,8 +101,50 @@ namespace Lennox.AsyncPostgresClient.Tests
                     : PostgresFormatCode.Text;
 
                 var reader = await command.ExecuteReaderAsync(cancel);
+                Assert.IsTrue(await reader.ReadAsync(cancel));
 
                 Assert.Inconclusive("TODO: Write this test");
+
+                Assert.IsFalse(await reader.ReadAsync(cancel));
+            }
+        }
+
+        [DataTestMethod]
+        [DataRow(false, "float4", DisplayName = "Text float4 results")]
+        [DataRow(true, "float4", DisplayName = "Binary float4 results")]
+        public async Task FloatingPointTest(bool useBinary, string floatFormat)
+        {
+            DebugLogger.Enabled = true;
+
+            var cancel = CancellationToken.None;
+
+            const decimal precision = 0.001m;
+
+            using (var connection = await PostgresServerInformation.Open())
+            using (var command = new PostgresCommand(
+                $"SELECT 123456789.005::{floatFormat}, 500.0123456789::{floatFormat}, 524287::{floatFormat}", connection))
+            {
+                connection.QueryResultFormat = useBinary
+                    ? PostgresFormatCode.Binary
+                    : PostgresFormatCode.Text;
+
+                var reader = await command.ExecuteReaderAsync(cancel);
+                Assert.IsTrue(await reader.ReadAsync(cancel));
+
+                // https://www.postgresql.org/docs/current/static/runtime-config-client.html#GUC-EXTRA-FLOAT-DIGITS
+                // Set to 3 to prevent rounding errors
+
+                switch (floatFormat)
+                {
+                    case "float4":
+                        var val1 = reader.GetFloat(0);
+                        var val2 = reader.GetFloat(1);
+                        NumericAsserts.FloatEquals(123457000f, val1, precision);
+                        NumericAsserts.FloatEquals(500.012f, val2, precision);
+                        break;
+                    default:
+                        throw new ArgumentOutOfRangeException(floatFormat);
+                }
 
                 Assert.IsFalse(await reader.ReadAsync(cancel));
             }
@@ -116,7 +159,7 @@ namespace Lennox.AsyncPostgresClient.Tests
 
             using (var connection = await PostgresServerInformation.Open())
             using (var command = new PostgresCommand(
-                "SELECT '2001-09-27 23:00:00'::timestamp", connection))
+                "SELECT '2001-09-27 23:00:00'::timestamp, '2002-10-28'::date at time zone 'PST'", connection))
             {
                 connection.QueryResultFormat = useBinary
                     ? PostgresFormatCode.Binary
@@ -125,6 +168,35 @@ namespace Lennox.AsyncPostgresClient.Tests
                 var reader = await command.ExecuteReaderAsync(cancel);
 
                 Assert.Inconclusive("TODO: Write this test");
+
+                Assert.IsFalse(await reader.ReadAsync(cancel));
+            }
+        }
+
+        [DataTestMethod]
+        [DataRow(false, DisplayName = "Text results")]
+        [DataRow(true, DisplayName = "Binary results")]
+        public async Task BasicTestDateTypes(bool useBinary)
+        {
+            var cancel = CancellationToken.None;
+
+            using (var connection = await PostgresServerInformation.Open())
+            using (var command = new PostgresCommand(
+                "SELECT '2001-09-27'::date", connection))
+            {
+                connection.QueryResultFormat = useBinary
+                    ? PostgresFormatCode.Binary
+                    : PostgresFormatCode.Text;
+
+                var reader = await command.ExecuteReaderAsync(cancel);
+                Assert.IsTrue(await reader.ReadAsync(cancel));
+
+                var date = (DateTime)reader[0];
+
+                Assert.AreEqual(2001, date.Year);
+                Assert.AreEqual(9, date.Month);
+                Assert.AreEqual(27, date.Day);
+                Assert.AreEqual(DateTimeKind.Utc, date.Kind);
 
                 Assert.IsFalse(await reader.ReadAsync(cancel));
             }

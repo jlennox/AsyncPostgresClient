@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
+using Lennox.AsyncPostgresClient.Diagnostic;
 
 namespace Lennox.AsyncPostgresClient.BufferAccess
 {
@@ -153,9 +154,9 @@ namespace Lennox.AsyncPostgresClient.BufferAccess
             throw new ArgumentOutOfRangeException();
         }
 
-        public static int AsciiToInt(byte[] data, int length)
+        public static int AsciiToInt(byte[] data, int offset, int length)
         {
-            if (TryAsciiToInt(data, 0, length, out var number))
+            if (TryAsciiToInt(data, offset, length, out var number))
             {
                 return number;
             }
@@ -203,62 +204,170 @@ namespace Lennox.AsyncPostgresClient.BufferAccess
         public static unsafe decimal AsciiToDecimal(byte[] data, int length)
         {
             const byte period = (byte)'.';
+            const byte plus = (byte)'+';
+            const byte e = (byte)'e';
 
             var periodPosition = -1;
+            var plusPosition = -1;
+            var plusStart = -1;
+            var hasPlus = false;
+
+            if (DebugLogger.Enabled)
+            {
+                DebugLogger.Log("AsciiToDecimal {0}",
+                    Encoding.ASCII.GetString(data, 0, length));
+            }
 
             fixed (byte* pt = data)
             {
+                var wasE = false;
+
                 for (var i = 0; i < length; ++i)
                 {
-                    if (pt[i] == period)
+                    var chr = pt[i];
+
+                    switch (chr)
                     {
-                        periodPosition = i;
-                        break;
+                        case period:
+                            if (wasE)
+                            {
+                                throw new InvalidOperationException(
+                                    $"Unexpected character in input at position {i - 1}.");
+                            }
+
+                            if (periodPosition != -1)
+                            {
+                                throw new InvalidOperationException(
+                                    $"Unexpected second peroid in input at position {i}.");
+                            }
+
+                            if (plusPosition != -1)
+                            {
+                                throw new InvalidOperationException(
+                                    $"Unexpected peroid after plus at position {i}.");
+                            }
+
+                            periodPosition = i;
+                            continue;
+                        case e:
+                            wasE = true;
+                            continue;
+                        case plus:
+                            if (plusPosition != -1)
+                            {
+                                throw new InvalidOperationException(
+                                    $"Unexpected second plus in input at position {i}.");
+                            }
+
+                            if (wasE)
+                            {
+                                wasE = false;
+                                plusStart = i - 1;
+                            }
+                            else
+                            {
+                                plusStart = i;
+                            }
+
+                            hasPlus = true;
+                            plusPosition = i;
+                            continue;
+                    }
+
+                    if (wasE)
+                    {
+                        throw new InvalidOperationException(
+                            $"Unexpected character in input at position {i - 1}.");
+                    }
+
+                    if (!char.IsNumber((char)chr))
+                    {
+                        throw new InvalidOperationException(
+                            $"Unexpected non-numeric input 0x{chr:X2} at position {i}.");
                     }
                 }
             }
 
+            var digitEnd = 0;
+            var decimalEnd = 0;
+
+            if (periodPosition == -1 && !hasPlus)
+            {
+                digitEnd = data.Length;
+            }
+            else if (periodPosition == -1 && hasPlus)
+            {
+                digitEnd = plusStart;
+            }
+            else if (periodPosition != -1 && !hasPlus)
+            {
+                digitEnd = periodPosition;
+                decimalEnd = data.Length;
+            }
+            else if (periodPosition != -1 && hasPlus)
+            {
+                digitEnd = periodPosition;
+                decimalEnd = plusStart;
+            }
+
+            var exponent = 0;
+
+            if (hasPlus)
+            {
+                exponent = AsciiToInt(data, plusPosition + 1,
+                    data.Length - plusPosition - 1);
+            }
+
             if (periodPosition == -1)
             {
-                return AsciiToLong(data, 0, length);
+                var val = AsciiToLong(data, 0, digitEnd);
+
+                return hasPlus ? (decimal)Math.Pow(val, exponent) : val;
             }
 
             var fractionStart = periodPosition + 1;
-            var fractionLength = length - fractionStart;
+            var fractionLength = decimalEnd - fractionStart;
 
             decimal whole = AsciiToLong(data, 0, periodPosition);
 
             // Catch unneeded trailing periods. "500."
             if (fractionStart >= length)
             {
-                return whole;
+                return hasPlus ? whole * (decimal)Math.Pow(10, exponent) : whole;
             }
 
             decimal fraction = AsciiToLong(
                 data, fractionStart, fractionLength);
 
+            decimal withFraction;
+
             switch (fractionLength)
             {
-                case 0:  return whole;
-                case 1:  return whole + fraction * .1m;
-                case 2:  return whole + fraction * .01m;
-                case 3:  return whole + fraction * .001m;
-                case 4:  return whole + fraction * .0001m;
-                case 5:  return whole + fraction * .00001m;
-                case 6:  return whole + fraction * .000001m;
-                case 7:  return whole + fraction * .0000001m;
-                case 8:  return whole + fraction * .00000001m;
-                case 9:  return whole + fraction * .000000001m;
-                case 10: return whole + fraction * .0000000001m;
+                case 0:  withFraction = whole; break;
+                case 1:  withFraction = whole + fraction * .1m; break;
+                case 2:  withFraction = whole + fraction * .01m; break;
+                case 3:  withFraction = whole + fraction * .001m; break;
+                case 4:  withFraction = whole + fraction * .0001m; break;
+                case 5:  withFraction = whole + fraction * .00001m; break;
+                case 6:  withFraction = whole + fraction * .000001m; break;
+                case 7:  withFraction = whole + fraction * .0000001m; break;
+                case 8:  withFraction = whole + fraction * .00000001m; break;
+                case 9:  withFraction = whole + fraction * .000000001m; break;
+                case 10: withFraction = whole + fraction * .0000000001m; break;
+                default:
+                    // TODO
+                    for (var i = 0; i < fractionLength; ++i)
+                    {
+                        fraction *= .1m;
+                    }
+
+                    withFraction = whole + fraction;
+                    break;
             }
 
-            // TODO
-            for (var i = 0; i < fractionLength; ++i)
-            {
-                fraction *= .1m;
-            }
-
-            return whole + fraction;
+            return hasPlus
+                ? withFraction * (decimal)Math.Pow(10, exponent)
+                : withFraction;
         }
     }
 }

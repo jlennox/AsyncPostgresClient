@@ -419,12 +419,37 @@ namespace Lennox.AsyncPostgresClient
     {
         public Encoding ClientEncoding;
         public Encoding ServerEncoding;
+        public bool IntegerDatetimes;
+
+        private static bool ReadBoolean(string boolean)
+        {
+            switch (boolean)
+            {
+                case "on": return true;
+                case "off": return false;
+            }
+
+            throw new ArgumentOutOfRangeException(
+                nameof(boolean), boolean,
+                "Unexpected value. Must be 'on' or 'off'.");
+        }
+
+        public void SetParameter(ParameterStatusMessage parameter)
+        {
+            switch (parameter.ParameterName)
+            {
+                case PostgresProperties.IntegerDatetimes:
+                    IntegerDatetimes = ReadBoolean(parameter.Value);
+                    break;
+            }
+        }
 
         public static PostgresClientState CreateDefault()
         {
             return new PostgresClientState {
                 ClientEncoding = Encoding.ASCII,
-                ServerEncoding = Encoding.ASCII
+                ServerEncoding = Encoding.ASCII,
+                IntegerDatetimes = true
             };
         }
     }

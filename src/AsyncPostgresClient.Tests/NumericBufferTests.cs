@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 using Lennox.AsyncPostgresClient.BufferAccess;
+using Lennox.AsyncPostgresClient.Diagnostic;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Lennox.AsyncPostgresClient.Tests
@@ -76,6 +77,8 @@ namespace Lennox.AsyncPostgresClient.Tests
         [TestMethod]
         public void TestAsciiToDecimal()
         {
+            DebugLogger.Enabled = true;
+
             AssertAsciiToDecimal("", 0m);
             AssertAsciiToDecimal(".", 0m);
             AssertAsciiToDecimal("5", 5m);
@@ -84,6 +87,10 @@ namespace Lennox.AsyncPostgresClient.Tests
             AssertAsciiToDecimal("32.46", 32.46m);
             AssertAsciiToDecimal("13012.41896", 13012.41896m);
             AssertAsciiToDecimal("18.230124718962", 18.230124718962m);
+            AssertAsciiToDecimal("18.230124718962+05", 1823012.4718962m);
+            AssertAsciiToDecimal("18.230124718962e+05", 1823012.4718962m);
+
+            AssertAsciiToDecimal("1.23457e+08", 123457000m);
         }
     }
 }
