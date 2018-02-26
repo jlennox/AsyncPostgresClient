@@ -227,9 +227,18 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
     {
         public static readonly PostgresGuidCodec Default = new PostgresGuidCodec();
 
-        public override Guid DecodeBinary(DataRow row, PostgresClientState state)
+        public override unsafe Guid DecodeBinary(DataRow row, PostgresClientState state)
         {
-            throw new NotImplementedException();
+            PostgresTypeConverter.DemandDataLength(row, 16);
+
+            fixed (byte* data = row.Data)
+            {
+                var a = BinaryBuffer.ReadIntNetworkUnsafe(data);
+                var b = BinaryBuffer.ReadShortNetworkUnsafe(&data[4]);
+                var c = BinaryBuffer.ReadShortNetworkUnsafe(&data[6]);
+                return new Guid(a, b, c, data[8], data[9], data[10],
+                    data[11], data[12], data[13], data[14], data[15]);
+            }
         }
 
         public override Guid DecodeText(DataRow row, PostgresClientState state)
