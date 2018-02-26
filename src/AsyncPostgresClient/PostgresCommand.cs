@@ -21,9 +21,12 @@ namespace Lennox.AsyncPostgresClient
         public override CommandType CommandType { get; set; }
         public override UpdateRowSource UpdatedRowSource { get; set; }
         protected override DbConnection DbConnection { get; set; }
-        protected override DbParameterCollection DbParameterCollection { get; }
+        protected override DbParameterCollection DbParameterCollection => PostgresParameters;
         protected override DbTransaction DbTransaction { get; set; }
         public override bool DesignTimeVisible { get; set; }
+
+        internal readonly PostgresDbParameterCollection PostgresParameters =
+             new PostgresDbParameterCollection();
 
         internal bool DoNotLoadTypeCollection { get; set; }
         internal PostgresTypeCollection TypeCollection { get; private set; }
@@ -79,7 +82,7 @@ namespace Lennox.AsyncPostgresClient
             bool async,
             CancellationToken cancellationToken)
         {
-            await _connection.Query(async, CommandText, cancellationToken)
+            await _connection.Query(async, this, cancellationToken)
                 .ConfigureAwait(false);
 
             return 0;
@@ -115,7 +118,7 @@ namespace Lennox.AsyncPostgresClient
                     async, cancellationToken).ConfigureAwait(false);
             }
 
-            await _connection.Query(async, CommandText, cancellationToken)
+            await _connection.Query(async, this, cancellationToken)
                 .ConfigureAwait(false);
 
             var reader = new PostgresDbDataReader(
@@ -128,6 +131,20 @@ namespace Lennox.AsyncPostgresClient
             CancellationToken cancellationToken)
         {
             throw new NotImplementedException();
+        }
+
+        internal async ValueTask<bool> ExecuteUntilFinished(
+            bool async, CancellationToken cancellationToken)
+        {
+            var reader = await ExecuteDbDataReader(
+                    async, CommandBehavior.Default, cancellationToken)
+                .ConfigureAwait(false);
+
+            while (await reader.ReadAsync(cancellationToken)
+                .ConfigureAwait(false))
+            { }
+
+            return true;
         }
 
         protected override void Dispose(bool disposing)

@@ -96,6 +96,13 @@ namespace Lennox.AsyncPostgresClient.Pool
             return new StringBuilder();
         }
 
+        public static StringBuilder Get(int capacity)
+        {
+            var sb = new StringBuilder();
+            sb.EnsureCapacity(capacity);
+            return sb;
+        }
+
         public static void Free(ref StringBuilder sb)
         {
             var exchanged = Interlocked.Exchange(ref sb, null);

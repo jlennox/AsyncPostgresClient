@@ -309,43 +309,119 @@ namespace Lennox.AsyncPostgresClient
         }
 
         internal async Task Query(
-            bool async, string query, CancellationToken cancellationToken)
+            bool async, DbCommand command, CancellationToken cancellationToken)
         {
             // https://github.com/LuaDist/libpq/blob/4a90601e5d395da904b43116ffb3052e86bdc8ec/src/interfaces/libpq/fe-exec.c#L1365
             WriteMessage(new ParseMessage {
-                Query = query
+                Query = command.CommandText
             });
 
-            WriteMessage(new BindMessage {
-                PreparedStatementName = "",
-                ResultColumnFormatCodeCount = 1,
-                ResultColumnFormatCodes =
-                    QueryResultFormat == PostgresFormatCode.Binary
-                        ? _binaryFormatCode
-                        : _textFormatCode
-            });
+            BindParameter[] parameters = null;
+            var parameterCount = command.Parameters.Count;
 
-            WriteMessage(new DescribeMessage {
-                StatementTargetType = StatementTargetType.Portal
-            });
+            if (parameterCount > short.MaxValue)
+            {
+                throw new IndexOutOfRangeException(
+                    $"Too many arguments provided for query. Found {parameterCount}, limit {short.MaxValue}.");
+            }
 
-            WriteMessage(new ExecuteMessage {
-            });
+            try
+            {
+                if (parameterCount > 0)
+                {
+                    parameters = ArrayPool<BindParameter>.GetArray(parameterCount);
+                    var encoding = ClientState.ClientEncoding;
 
-            WriteMessage(new SyncMessage {
-            });
+                    for (var i = 0; i < parameterCount; ++i)
+                    {
+                        var param = command.Parameters[i].Value;
 
-            await FlushWrites(async, cancellationToken).ConfigureAwait(false);
+                        if (param == null)
+                        {
+                            parameters[i] = new BindParameter {
+                                ParameterByteCount = 0,
+                                Parameters = EmptyArray<byte>.Value
+                            };
+
+                            continue;
+                        }
+
+                        // TODO: This allocation fest terrible. Make this write
+                        // directly to the memorystream instead of having
+                        // intermittent buffers for everything.
+
+                        var paramString = param.ToString();
+
+                        var maxBytes = encoding
+                            .GetMaxByteCount(paramString.Length);
+
+                        var paramBuffer = ArrayPool<byte>.GetArray(maxBytes);
+
+                        var actualBytes = encoding.GetBytes(
+                            paramString, 0, paramString.Length,
+                            paramBuffer, 0);
+
+                        parameters[i] = new BindParameter {
+                            ParameterByteCount = actualBytes,
+                            Parameters = paramBuffer
+                        };
+                    }
+                }
+
+                WriteMessage(new BindMessage {
+                    PreparedStatementName = "",
+                    ResultColumnFormatCodeCount = 1,
+                    ParameterCount = (short)parameterCount,
+                    Parameters = parameters,
+                    ResultColumnFormatCodes =
+                        QueryResultFormat == PostgresFormatCode.Binary
+                            ? _binaryFormatCode
+                            : _textFormatCode
+                });
+
+                WriteMessage(new DescribeMessage {
+                    StatementTargetType = StatementTargetType.Portal
+                });
+
+                WriteMessage(new ExecuteMessage {
+                });
+
+                WriteMessage(new SyncMessage {
+                });
+
+                await FlushWrites(async, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                if (parameters != null)
+                {
+                    for (var i = 0; i < parameterCount; ++i)
+                    {
+                        var param = parameters[i].Parameters;
+                        ArrayPool.Free(ref param);
+                    }
+                }
+            }
         }
 
         internal async Task SimpleQuery(
             bool async, string query, CancellationToken cancellationToken)
         {
+            // NOTE: Marked for demolition?
+
             WriteMessage(new QueryMessage {
                 Query = query
             });
 
             await FlushWrites(async, cancellationToken).ConfigureAwait(false);
+
+            await EnsureNextMessage<CommandCompleteMessage>(
+                    async, cancellationToken)
+                .ConfigureAwait(false);
+
+            await EnsureNextMessageIsReadyForQuery(
+                    async, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         private void Authenticate(AuthenticationMessage authenticationMessage)
@@ -371,7 +447,19 @@ namespace Lennox.AsyncPostgresClient
             }
         }
 
-        private async Task<T> EnsureNextMessage<T>(
+        private async ValueTask<bool> EnsureNextMessageIsReadyForQuery(
+            bool async, CancellationToken cancellationToken)
+        {
+            var message = await EnsureNextMessage<ReadyForQueryMessage>(
+                    async, cancellationToken)
+                .ConfigureAwait(false);
+
+            message.AssertType(TransactionIndicatorType.Idle);
+
+            return true;
+        }
+
+        private async ValueTask<T> EnsureNextMessage<T>(
             bool async, CancellationToken cancellationToken)
             where T : IPostgresMessage
         {
@@ -462,6 +550,87 @@ namespace Lennox.AsyncPostgresClient
                         "PostgresConnection has ended.");
                 }
             }
+        }
+
+        public void SendProperty(PostgresPropertySetting setting)
+        {
+            // TODO: Make this API not allocate.
+            SendProperties(false, new[] { setting }, CancellationToken.None)
+                .AssertCompleted();
+        }
+
+        public void SendProperty(params PostgresPropertySetting[] settings)
+        {
+            // TODO: Make this API not allocate.
+            SendProperties(false, settings, CancellationToken.None)
+                .AssertCompleted();
+        }
+
+        public Task SendPropertyAsync(
+            PostgresPropertySetting setting,
+            CancellationToken cancellationToken)
+        {
+            // TODO: Make this API not allocate.
+            return SendProperties(true, new[] { setting }, cancellationToken)
+                .AsTask();
+        }
+
+        public Task SendPropertyAsync(
+            CancellationToken cancellationToken,
+            params PostgresPropertySetting[] settings)
+        {
+            // TODO: Make this API not allocate.
+            return SendProperties(true, settings, cancellationToken)
+                .AsTask();
+        }
+
+        private async ValueTask<bool> SendProperties(
+            bool async,
+            PostgresPropertySetting[] properties,
+            CancellationToken cancellationToken)
+        {
+            if (properties == null || properties.Length == 0)
+            {
+                return true;
+            }
+
+            using (var command = new PostgresCommand(null, this))
+            {
+                var sb = StringBuilderPool.Get();
+                try
+                {
+                    var parameterNumber = 1;
+
+                    for (var i = 0; i < properties.Length; ++i)
+                    {
+                        var property = properties[i];
+
+                        // select set_config('setting','value',false);
+
+                        sb.Append("SELECT set_config($");
+                        sb.Append(parameterNumber);
+                        ++parameterNumber;
+                        sb.Append(",$");
+                        sb.Append(parameterNumber);
+                        ++parameterNumber;
+                        sb.Append(",false);");
+
+                        command.Parameters.Add(property.Name);
+                        command.Parameters.Add(property.Value);
+                    }
+
+                    command.CommandText = sb.ToString();
+                }
+                finally
+                {
+                    StringBuilderPool.Free(ref sb);
+                }
+
+                await command.ExecuteUntilFinished(async, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            return true;
         }
 
         protected override DbCommand CreateDbCommand()

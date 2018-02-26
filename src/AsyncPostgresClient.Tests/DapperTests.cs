@@ -112,6 +112,8 @@ namespace Lennox.AsyncPostgresClient.Tests
         [DataTestMethod]
         [DataRow(false, "float4", DisplayName = "Text float4 results")]
         [DataRow(true, "float4", DisplayName = "Binary float4 results")]
+        [DataRow(false, "float8", DisplayName = "Text float8 results")]
+        [DataRow(true, "float8", DisplayName = "Binary float8 results")]
         public async Task FloatingPointTest(bool useBinary, string floatFormat)
         {
             DebugLogger.Enabled = true;
@@ -121,32 +123,42 @@ namespace Lennox.AsyncPostgresClient.Tests
             const decimal precision = 0.001m;
 
             using (var connection = await PostgresServerInformation.Open())
-            using (var command = new PostgresCommand(
-                $"SELECT 123456789.005::{floatFormat}, 500.0123456789::{floatFormat}, 524287::{floatFormat}", connection))
             {
-                connection.QueryResultFormat = useBinary
-                    ? PostgresFormatCode.Binary
-                    : PostgresFormatCode.Text;
+                await connection.SendPropertyAsync(cancel,
+                    new PostgresPropertySetting(
+                        PostgresPropertyName.ExtraFloatDigits,
+                        "3"));
 
-                var reader = await command.ExecuteReaderAsync(cancel);
-                Assert.IsTrue(await reader.ReadAsync(cancel));
-
-                // https://www.postgresql.org/docs/current/static/runtime-config-client.html#GUC-EXTRA-FLOAT-DIGITS
-                // Set to 3 to prevent rounding errors
-
-                switch (floatFormat)
+                using (var command = new PostgresCommand(
+                    $"SELECT 123456789.005::{floatFormat}, 500.0123456789::{floatFormat}", connection))
                 {
-                    case "float4":
-                        var val1 = reader.GetFloat(0);
-                        var val2 = reader.GetFloat(1);
-                        NumericAsserts.FloatEquals(123457000f, val1, precision);
-                        NumericAsserts.FloatEquals(500.012f, val2, precision);
-                        break;
-                    default:
-                        throw new ArgumentOutOfRangeException(floatFormat);
-                }
+                    connection.QueryResultFormat = useBinary
+                        ? PostgresFormatCode.Binary
+                        : PostgresFormatCode.Text;
 
-                Assert.IsFalse(await reader.ReadAsync(cancel));
+                    var reader = await command.ExecuteReaderAsync(cancel);
+                    Assert.IsTrue(await reader.ReadAsync(cancel));
+
+                    switch (floatFormat)
+                    {
+                        case "float4":
+                            var val1 = reader.GetFloat(0);
+                            var val2 = reader.GetFloat(1);
+                            NumericAsserts.FloatEquals(123456789.005f, val1, precision);
+                            NumericAsserts.FloatEquals(500.012f, val2, precision);
+                            break;
+                        case "float8":
+                            var valb1 = reader.GetDouble(0);
+                            var valb2 = reader.GetDouble(1);
+                            NumericAsserts.FloatEquals(123456789.005, valb1, precision);
+                            NumericAsserts.FloatEquals(500.012f, valb2, precision);
+                            break;
+                        default:
+                            throw new ArgumentOutOfRangeException(floatFormat);
+                    }
+
+                    Assert.IsFalse(await reader.ReadAsync(cancel));
+                }
             }
         }
 

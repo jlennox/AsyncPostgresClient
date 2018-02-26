@@ -5,7 +5,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Lennox.AsyncPostgresClient.Tests
 {
-    internal class NumericAsserts
+    internal static class NumericAsserts
     {
         public static void Less<T>(T expectedLarger, T expectedSmaller)
             where T : IComparable
@@ -17,8 +17,8 @@ namespace Lennox.AsyncPostgresClient.Tests
         }
 
         public static void FloatEquals(
-            float expected,
-            float actual,
+            double expected,
+            double actual,
             decimal precision)
         {
             var diff = (decimal)Math.Abs(expected - actual);

@@ -551,7 +551,7 @@ namespace Lennox.AsyncPostgresClient
                 ParameterByteCount);
 
             ms.WriteNetwork(ParameterByteCount);
-            return ms.WriteNetwork(Parameters, ParameterByteCount) + 2;
+            return ms.WriteNetwork(Parameters, ParameterByteCount) + 4;
         }
     }
 
@@ -1475,8 +1475,8 @@ namespace Lennox.AsyncPostgresClient
     {
         public const byte MessageId = (byte)'S';
 
-        public string ParameterName { get; private set; }
-        public string Value { get; private set; }
+        public string ParameterName { get; set; }
+        public string Value { get; set; }
 
         public void Read(ref PostgresClientState state, BinaryBuffer bb, int length)
         {
@@ -1493,7 +1493,15 @@ namespace Lennox.AsyncPostgresClient
 
         public void Write(ref PostgresClientState state, MemoryStream ms)
         {
-            throw new PostgresServerOnlyMessageException();
+            ms.WriteByte(MessageId);
+
+            var length = 0;
+            var lengthPos = LengthPlacehold.Start(ms);
+
+            length += ms.WriteString(ParameterName, state.ClientEncoding);
+            length += ms.WriteString(Value, state.ClientEncoding);
+
+            lengthPos.WriteLength(length);
         }
     }
 
