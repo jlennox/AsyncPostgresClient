@@ -60,7 +60,7 @@ namespace Lennox.AsyncPostgresClient
 
         protected override DbParameter CreateDbParameter()
         {
-            throw new NotImplementedException();
+            return new PostgresParameter();
         }
 
         public override object ExecuteScalar()
@@ -82,10 +82,20 @@ namespace Lennox.AsyncPostgresClient
             bool async,
             CancellationToken cancellationToken)
         {
-            await _connection.Query(async, this, cancellationToken)
-                .ConfigureAwait(false);
+            using (var reader = await ExecuteDbDataReader(
+                    async, CommandBehavior.Default, cancellationToken)
+                .ConfigureAwait(false) as PostgresDbDataReader)
+            {
+                var hasResults = await reader.Read(async, cancellationToken)
+                    .ConfigureAwait(false);
 
-            return 0;
+                if (!hasResults || reader.FieldCount == 0)
+                {
+                    return null;
+                }
+
+                return reader.GetValue(0);
+            }
         }
 
         protected override DbDataReader ExecuteDbDataReader(
@@ -106,7 +116,7 @@ namespace Lennox.AsyncPostgresClient
             return ExecuteDbDataReader(
                 false, behavior, CancellationToken.None).AsTask();
         }
-
+         
         internal async ValueTask<DbDataReader> ExecuteDbDataReader(
             bool async,
             CommandBehavior behavior,
@@ -123,6 +133,9 @@ namespace Lennox.AsyncPostgresClient
 
             var reader = new PostgresDbDataReader(
                 behavior, _connection, this, cancellationToken);
+
+            await reader.ReadUntilData(async, cancellationToken)
+                .ConfigureAwait(false);
 
             return reader;
         }
@@ -145,6 +158,11 @@ namespace Lennox.AsyncPostgresClient
             { }
 
             return true;
+        }
+
+        internal string GetRewrittenCommandText()
+        {
+            return PostgresSqlCommandRewriter.Perform(this);
         }
 
         protected override void Dispose(bool disposing)

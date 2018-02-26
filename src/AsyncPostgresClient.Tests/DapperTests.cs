@@ -22,6 +22,26 @@ namespace Lennox.AsyncPostgresClient.Tests
             }
         }
 
+        class TheOne
+        {
+            public int AOne { get; set; }
+        }
+
+        [TestMethod]
+        public async Task TestDapperSelectOneParameter()
+        {
+            using (var connection = await PostgresServerInformation.Open())
+            {
+                var one = await connection.QueryAsync<TheOne>(
+                    "SELECT AOne FROM (SELECT 1 AS AOne) s WHERE AOne = @AOne", new {
+                        AOne = 1
+                    });
+
+                var results = one.ToArray();
+                CollectionAssert.AreEqual(new[] { 1 }, results);
+            }
+        }
+
         [TestMethod]
         public async Task TestExecuteScalarAsync()
         {

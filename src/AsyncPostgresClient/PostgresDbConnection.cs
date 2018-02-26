@@ -309,12 +309,11 @@ namespace Lennox.AsyncPostgresClient
         }
 
         internal async Task Query(
-            bool async, DbCommand command, CancellationToken cancellationToken)
+            bool async,
+            PostgresCommand command,
+            CancellationToken cancellationToken)
         {
             // https://github.com/LuaDist/libpq/blob/4a90601e5d395da904b43116ffb3052e86bdc8ec/src/interfaces/libpq/fe-exec.c#L1365
-            WriteMessage(new ParseMessage {
-                Query = command.CommandText
-            });
 
             BindParameter[] parameters = null;
             var parameterCount = command.Parameters.Count;
@@ -325,11 +324,17 @@ namespace Lennox.AsyncPostgresClient
                     $"Too many arguments provided for query. Found {parameterCount}, limit {short.MaxValue}.");
             }
 
+            var queryText = command.CommandText;
+
             try
             {
                 if (parameterCount > 0)
                 {
-                    parameters = ArrayPool<BindParameter>.GetArray(parameterCount);
+                    queryText = command.GetRewrittenCommandText();
+
+                    parameters = ArrayPool<BindParameter>
+                        .GetArray(parameterCount);
+
                     var encoding = ClientState.ClientEncoding;
 
                     for (var i = 0; i < parameterCount; ++i)
@@ -367,6 +372,10 @@ namespace Lennox.AsyncPostgresClient
                         };
                     }
                 }
+
+                WriteMessage(new ParseMessage {
+                    Query = queryText
+                });
 
                 WriteMessage(new BindMessage {
                     PreparedStatementName = "",
@@ -555,14 +564,15 @@ namespace Lennox.AsyncPostgresClient
         public void SendProperty(PostgresPropertySetting setting)
         {
             // TODO: Make this API not allocate.
-            SendProperties(false, new[] { setting }, CancellationToken.None)
+            SendProperties(false, new[] { setting }, 1, CancellationToken.None)
                 .AssertCompleted();
         }
 
         public void SendProperty(params PostgresPropertySetting[] settings)
         {
             // TODO: Make this API not allocate.
-            SendProperties(false, settings, CancellationToken.None)
+            SendProperties(false, settings,
+                    settings.Length, CancellationToken.None)
                 .AssertCompleted();
         }
 
@@ -571,7 +581,8 @@ namespace Lennox.AsyncPostgresClient
             CancellationToken cancellationToken)
         {
             // TODO: Make this API not allocate.
-            return SendProperties(true, new[] { setting }, cancellationToken)
+            return SendProperties(true, new[] { setting },
+                    1, cancellationToken)
                 .AsTask();
         }
 
@@ -580,13 +591,15 @@ namespace Lennox.AsyncPostgresClient
             params PostgresPropertySetting[] settings)
         {
             // TODO: Make this API not allocate.
-            return SendProperties(true, settings, cancellationToken)
+            return SendProperties(true, settings,
+                    settings.Length, cancellationToken)
                 .AsTask();
         }
 
         private async ValueTask<bool> SendProperties(
             bool async,
             PostgresPropertySetting[] properties,
+            int propertiesCount,
             CancellationToken cancellationToken)
         {
             if (properties == null || properties.Length == 0)
@@ -601,7 +614,7 @@ namespace Lennox.AsyncPostgresClient
                 {
                     var parameterNumber = 1;
 
-                    for (var i = 0; i < properties.Length; ++i)
+                    for (var i = 0; i < propertiesCount; ++i)
                     {
                         var property = properties[i];
 
@@ -650,6 +663,17 @@ namespace Lennox.AsyncPostgresClient
 
             _typeCollection = await PostgresTypeCollection
                 .Create(async, this, cancellationToken).ConfigureAwait(false);
+
+            return _typeCollection;
+        }
+
+        internal PostgresTypeCollection DemandTypeCollection()
+        {
+            if (_typeCollection == null)
+            {
+                throw new InvalidOperationException(
+                    "Invalid execution sequence. Type collection is not yet initialized.");
+            }
 
             return _typeCollection;
         }

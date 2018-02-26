@@ -23,9 +23,19 @@ namespace Lennox.AsyncPostgresClient
 
         public override int Add(object value)
         {
-            _paramaters.Add(new PostgresParameter(value));
+            _paramaters.Add(GetParameter(value));
 
             return _paramaters.Count;
+        }
+
+        private static PostgresParameter GetParameter(object value)
+        {
+            if (value is PostgresParameter param)
+            {
+                return param;
+            }
+
+            return new PostgresParameter(value);
         }
 
         public override void Clear()
@@ -53,7 +63,7 @@ namespace Lennox.AsyncPostgresClient
 
         public override void Insert(int index, object value)
         {
-            _paramaters.Insert(index, new PostgresParameter(value));
+            _paramaters.Insert(index, GetParameter(value));
         }
 
         public override void Remove(object value)
@@ -153,6 +163,21 @@ namespace Lennox.AsyncPostgresClient
 
     internal class PostgresParameter : DbParameter
     {
+        public override DbType DbType { get; set; }
+        public override ParameterDirection Direction { get; set; }
+        public override bool IsNullable { get; set; }
+        public override string ParameterName
+        {
+            get => _name;
+            set => _name = CleanName(value);
+        }
+        public override string SourceColumn { get; set; }
+        public override object Value { get; set; }
+        public override bool SourceColumnNullMapping { get; set; }
+        public override int Size { get; set; }
+
+        private string _name;
+
         public PostgresParameter() { }
 
         public PostgresParameter(object value)
@@ -165,13 +190,21 @@ namespace Lennox.AsyncPostgresClient
             throw new NotImplementedException();
         }
 
-        public override DbType DbType { get; set; }
-        public override ParameterDirection Direction { get; set; }
-        public override bool IsNullable { get; set; }
-        public override string ParameterName { get; set; }
-        public override string SourceColumn { get; set; }
-        public override object Value { get; set; }
-        public override bool SourceColumnNullMapping { get; set; }
-        public override int Size { get; set; }
+        internal static string CleanName(string name)
+        {
+            if (name == null || name.Length == 0)
+            {
+                return "";
+            }
+
+            switch (name[0])
+            {
+                case '@':
+                case ':':
+                    return name.Substring(1);
+            }
+
+            return name;
+        }
     }
 }

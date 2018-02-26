@@ -4,14 +4,31 @@ using Lennox.AsyncPostgresClient.BufferAccess;
 
 namespace Lennox.AsyncPostgresClient.PostgresTypes
 {
+
+    [AttributeUsage(AttributeTargets.Class)]
+    internal class PostgresTypeConverterMethodAttribute : Attribute
+    {
+        public string[] PostgresTypeNames { get; }
+
+        public PostgresTypeConverterMethodAttribute(
+            params string[] postgresTypeNames)
+        {
+            PostgresTypeNames = postgresTypeNames;
+        }
+    }
+
     internal interface IPostgresTypeCodec
     {
+        Type SystemType { get; set; }
+
         object DecodeBinaryObject(DataRow row, PostgresClientState state);
         object DecodeTextObject(DataRow row, PostgresClientState state);
     }
 
     internal abstract class PostgresTypeCodec<T> : IPostgresTypeCodec
     {
+        public Type SystemType { get; set; } = typeof(T);
+
         public abstract T DecodeBinary(DataRow row, PostgresClientState state);
         public abstract T DecodeText(DataRow row, PostgresClientState state);
         public abstract void EncodeBinary(MemoryStream ms, T value, PostgresClientState state);

@@ -74,6 +74,18 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
             }
         }
 
+        public Type LookupType(int oid)
+        {
+            if (!_oidCodecLookup.TryGetValue(oid, out var typeConverter))
+            {
+                return typeof(object);
+            }
+
+            var codec = typeConverter.Codec;
+
+            return codec.SystemType;
+        }
+
         public object Convert(
             int oid,
             DataRow row,
@@ -124,17 +136,6 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
 
         private string _name;
         private int _nameHashCode;
-    }
-
-    [AttributeUsage(AttributeTargets.Method | AttributeTargets.Class)]
-    internal class PostgresTypeConverterMethodAttribute : Attribute
-    {
-        public string[] PostgresTypeNames { get; }
-
-        public PostgresTypeConverterMethodAttribute(params string[] postgresTypeNames)
-        {
-            PostgresTypeNames = postgresTypeNames;
-        }
     }
 
     internal static class PostgresTypeNames

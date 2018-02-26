@@ -210,7 +210,12 @@ namespace Lennox.AsyncPostgresClient
 
         public override Type GetFieldType(int ordinal)
         {
-            throw new NotImplementedException();
+            var description = GetRowDescription(ordinal, true);
+
+            var typeCollection = _connection.DemandTypeCollection();
+            var oid = description.Column.DataTypeObjectId;
+
+            return typeCollection.LookupType(oid);
         }
 
         public override float GetFloat(int ordinal)
@@ -260,12 +265,16 @@ namespace Lennox.AsyncPostgresClient
 
         public override string GetName(int ordinal)
         {
-            throw new NotImplementedException();
+            var description = GetRowDescription(ordinal, true);
+
+            return description.Column.Name;
         }
 
         public override int GetOrdinal(string name)
         {
-            throw new NotImplementedException();
+            var description = GetRowDescription(name);
+
+            return description.Column.ColumnIndex;
         }
 
         public override string GetString(int ordinal)
@@ -327,6 +336,39 @@ namespace Lennox.AsyncPostgresClient
             return Read(true, cancellationToken).AsTask();
         }
 
+        internal async ValueTask<bool> ReadUntilData(
+            bool async, CancellationToken cancellationToken)
+        {
+            CheckIsClosed();
+
+            // https://www.postgresql.org/docs/10/static/protocol-flow.html#idm46428663987712
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var message = await _connection
+                    .ReadNextMessage(async, cancellationToken)
+                    .ConfigureAwait(false);
+
+                switch (message)
+                {
+                    case ParseCompleteMessage parseCompleteMessage:
+                        // TODO: Do something?
+                        continue;
+                    case BindCompleteMessage bindCompleteMessage:
+                        // TODO: Do something?
+                        continue;
+                    case RowDescriptionMessage descriptionMessage:
+                        _descriptionMessage?.TryDispose();
+                        _fieldCount = descriptionMessage.FieldCount;
+                        _descriptionMessage = descriptionMessage;
+                        return true;;
+                    default:
+                        throw new PostgresInvalidMessageException(message);
+                }
+            }
+        }
+
         internal async ValueTask<bool> Read(
             bool async, CancellationToken cancellationToken)
         {
@@ -360,9 +402,9 @@ namespace Lennox.AsyncPostgresClient
 
                         continue;
                     case CopyInResponseMessage copyInMessage:
-                        break;
+                        throw new NotImplementedException();
                     case CopyOutResponseMessage copyOutMessage:
-                        break;
+                        throw new NotImplementedException();
                     case RowDescriptionMessage descriptionMessage:
                         _descriptionMessage?.TryDispose();
                         _fieldCount = descriptionMessage.FieldCount;
@@ -451,7 +493,8 @@ namespace Lennox.AsyncPostgresClient
             return GetRowDescription(GetOrdinal(name));
         }
 
-        private RowDescription GetRowDescription(int ordinal)
+        private RowDescription GetRowDescription(
+            int ordinal, bool ignoreData = false)
         {
             if (ordinal > _fieldCount)
             {
@@ -459,7 +502,7 @@ namespace Lennox.AsyncPostgresClient
                     $"The index passed was outside the range of 0 through {_fieldCount}.");
             }
 
-            if (!_lastDataRowMessage.HasValue)
+            if (!ignoreData && !_lastDataRowMessage.HasValue)
             {
                 // TODO.
                 throw new InvalidOperationException();
@@ -471,7 +514,10 @@ namespace Lennox.AsyncPostgresClient
                 throw new InvalidOperationException();
             }
 
-            var row = _lastDataRowMessage.Value.Rows[ordinal];
+            var row = ignoreData
+                ? default(DataRow)
+                : _lastDataRowMessage.Value.Rows[ordinal];
+
             var column = _descriptionMessage.Value.Fields[ordinal];
 
             return new RowDescription {
