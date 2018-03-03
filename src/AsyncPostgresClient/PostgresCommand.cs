@@ -1,6 +1,8 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Lennox.AsyncPostgresClient.Extension;
@@ -38,8 +40,14 @@ namespace Lennox.AsyncPostgresClient
             string command,
             PostgresDbConnectionBase connection)
         {
+            Argument.HasValue(nameof(connection), connection);
+
             _command = command;
             _connection = connection;
+        }
+
+        internal PostgresCommand()
+        {
         }
 
         public override void Cancel()
@@ -116,6 +124,15 @@ namespace Lennox.AsyncPostgresClient
             return ExecuteDbDataReader(
                 false, behavior, CancellationToken.None).AsTask();
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal ValueTask<DbDataReader> ExecuteDbDataReader(
+            bool async,
+            CancellationToken cancellationToken)
+        {
+            return ExecuteDbDataReader(
+                async, CommandBehavior.Default, cancellationToken);
+        }
          
         internal async ValueTask<DbDataReader> ExecuteDbDataReader(
             bool async,
@@ -134,8 +151,16 @@ namespace Lennox.AsyncPostgresClient
             var reader = new PostgresDbDataReader(
                 behavior, _connection, this, cancellationToken);
 
-            await reader.ReadUntilData(async, cancellationToken)
-                .ConfigureAwait(false);
+            try
+            {
+                await reader.ReadUntilData(async, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch
+            {
+                reader.TryDispose();
+                throw;
+            }
 
             return reader;
         }
@@ -160,9 +185,10 @@ namespace Lennox.AsyncPostgresClient
             return true;
         }
 
-        internal string GetRewrittenCommandText()
+        internal IReadOnlyList<string> GetRewrittenCommandText()
         {
-            return PostgresSqlCommandRewriter.Perform(this);
+            // TODO: First argument should not be null.
+            return PostgresSqlCommandParser.Perform(null, this);
         }
 
         protected override void Dispose(bool disposing)

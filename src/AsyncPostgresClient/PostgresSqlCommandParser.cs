@@ -5,20 +5,44 @@ using Lennox.AsyncPostgresClient.Pool;
 
 namespace Lennox.AsyncPostgresClient
 {
-    internal class PostgresSqlCommandRewriter
+    internal static class PostgresSqlCommandParser
     {
-        public static unsafe string Perform(PostgresCommand command)
+        // It's safe for "bit" and "unicode" ones to be 
+        enum QuotesType
         {
+            No,
+            Normal, // 'string'
+            Escape, // E'string'
+            Dollar // $$foo$$ or $name$foo$name$
+        }
+
+        struct Quotes
+        {
+            public QuotesType Type { get; set; }
+            public string Name { get; set; }
+        }
+
+        public static unsafe IReadOnlyList<string> Perform(
+            IReadOnlyList<PostgresPropertySetting> settings,
+            PostgresCommand command)
+        {
+            Argument.HasValue(nameof(settings), settings);
+
             var parameters  = command.Parameters;
             var sql = command.CommandText;
 
             if (sql == null)
             {
-                return "";
+                return EmptyList<string>.Value;
             }
 
+            DemandStandardSettings(settings);
+
+            var queries = new List<string>();
+            var quotes = ObjectPool<Stack<Quotes>>.Get();
             var sb = StringBuilderPool.Get(sql.Length);
-            
+            //Quotes? currentQuotes = null;
+
             try
             {
                 var lastChar = '\0';
@@ -73,11 +97,43 @@ namespace Lennox.AsyncPostgresClient
                     }
                 }
 
-                return sb.ToString();
+                return queries;
             }
             finally
             {
+                quotes.Clear();
                 StringBuilderPool.Free(ref sb);
+                ObjectPool<Stack<Quotes>>.Free(ref quotes);
+            }
+        }
+
+        internal static void DemandStandardSettings(
+            IReadOnlyList<PostgresPropertySetting> settings)
+        {
+            if (settings == null)
+            {
+                return;
+            }
+
+            for (var i = 0; i < settings.Count; ++i)
+            {
+                var setting = settings[i];
+
+                switch (setting.Name)
+                {
+                    case PostgresProperties.BackslashQuote:
+                        if (setting.Value == "safe_encoding") continue;
+                        break;
+                    case PostgresProperties.StandardConformingStrings:
+                        if (setting.Value == "on") continue;
+                        break;
+                    default:
+                        continue;
+                }
+
+                throw new ArgumentOutOfRangeException(
+                    setting.Name, setting.Value,
+                    "Only the default setting value is supported.");
             }
         }
     }

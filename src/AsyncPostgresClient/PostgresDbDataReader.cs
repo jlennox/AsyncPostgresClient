@@ -313,14 +313,15 @@ namespace Lennox.AsyncPostgresClient
 
         public override bool NextResult()
         {
+            // This is not supported at this time.
             _connection.CheckAsyncOnly();
-            throw new NotImplementedException();
+            return false;
         }
 
         public override Task<bool> NextResultAsync(
             CancellationToken cancellationToken)
         {
-            throw new NotImplementedException();
+            return TaskCache.False;
         }
 
         public override bool Read()

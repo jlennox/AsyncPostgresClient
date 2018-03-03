@@ -66,6 +66,8 @@ namespace Lennox.AsyncPostgresClient
                         {
                             state.Position = PostgresReadStatePosition.Data;
                             state.DataLeft = state.Length - 4;
+
+                            // TODO: Reusable buffer.
                             state.Data = new byte[state.DataLeft];
                         }
 

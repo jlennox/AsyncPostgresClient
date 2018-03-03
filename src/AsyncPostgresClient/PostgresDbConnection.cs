@@ -144,6 +144,8 @@ namespace Lennox.AsyncPostgresClient
         private readonly CancellationTokenSource _cancel =
             new CancellationTokenSource();
 
+        internal IReadOnlyList<PostgresPropertySetting> Properties;
+
         private static readonly PostgresFormatCode[] _binaryFormatCode = new[] {
             PostgresFormatCode.Binary
         };
@@ -324,14 +326,14 @@ namespace Lennox.AsyncPostgresClient
                     $"Too many arguments provided for query. Found {parameterCount}, limit {short.MaxValue}.");
             }
 
-            var queryText = command.CommandText;
+            // TODO
+            var queries = command.GetRewrittenCommandText();
+            var queryText = queries[0];
 
             try
             {
                 if (parameterCount > 0)
                 {
-                    queryText = command.GetRewrittenCommandText();
-
                     parameters = ArrayPool<BindParameter>
                         .GetArray(parameterCount);
 
@@ -431,6 +433,11 @@ namespace Lennox.AsyncPostgresClient
             await EnsureNextMessageIsReadyForQuery(
                     async, cancellationToken)
                 .ConfigureAwait(false);
+        }
+
+        public PostgresCommand CreateCommand(string command)
+        {
+            return new PostgresCommand(command, this);
         }
 
         private void Authenticate(AuthenticationMessage authenticationMessage)

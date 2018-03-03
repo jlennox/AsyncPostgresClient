@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Lennox.AsyncPostgresClient.Pool;
 
 namespace Lennox.AsyncPostgresClient
@@ -23,27 +25,29 @@ namespace Lennox.AsyncPostgresClient
             Value = value;
         }
 
-        internal string GetQueryString()
+        public static async Task<IReadOnlyList<PostgresPropertySetting>> GetAll(
+            bool async,
+            PostgresDbConnection connection,
+            CancellationToken cancellationToken)
         {
-            var sb  = StringBuilderPool.Get();
+            var properties = new List<PostgresPropertySetting>(240);
 
-            // HACK:
-            // TODO: Fix escaping.
+            const string sql = "select name, setting from pg_settings";
 
-            try
+            using (var command = connection.CreateCommand(sql))
+            using (var reader = await command.ExecuteDbDataReader(
+                    async, cancellationToken)
+                .ConfigureAwait(false) as PostgresDbDataReader)
             {
-                sb.Append("SET ");
-                sb.Append(Name);
-                sb.Append(" = '");
-                sb.Append(Value);
-                sb.Append("';");
+                while (await reader.Read(async, cancellationToken)
+                    .ConfigureAwait(false))
+                {
+                    properties.Add(new PostgresPropertySetting(
+                        reader.GetString(0), reader.GetString(1)));
+                }
+            }
 
-                return sb.ToString();
-            }
-            finally
-            {
-                StringBuilderPool.Free(ref sb);
-            }
+            return properties;
         }
     }
 

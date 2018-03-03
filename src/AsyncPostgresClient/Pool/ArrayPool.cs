@@ -1,4 +1,5 @@
-﻿using System.IO;
+﻿using System;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
@@ -64,6 +65,25 @@ namespace Lennox.AsyncPostgresClient.Pool
         public static void FreeArray(ref T[] array)
         {
             _default.Free(ref array);
+        }
+    }
+
+    internal static class ObjectPool<T>
+        where T : class
+    {
+        public static T Get()
+        {
+            return Activator.CreateInstance<T>();
+        }
+
+        public static void Free(ref T obj)
+        {
+            var exchanged = Interlocked.Exchange(ref obj, null);
+
+            if (exchanged == null)
+            {
+                return;
+            }
         }
     }
 

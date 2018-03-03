@@ -28,6 +28,13 @@ namespace Lennox.AsyncPostgresClient
             return _paramaters.Count;
         }
 
+        public int Add(string name, object value)
+        {
+            _paramaters.Add(new PostgresParameter(name, value));
+
+            return _paramaters.Count;
+        }
+
         private static PostgresParameter GetParameter(object value)
         {
             if (value is PostgresParameter param)
@@ -182,6 +189,12 @@ namespace Lennox.AsyncPostgresClient
 
         public PostgresParameter(object value)
         {
+            Value = value;
+        }
+
+        public PostgresParameter(string name, object value)
+        {
+            ParameterName = name;
             Value = value;
         }
 
