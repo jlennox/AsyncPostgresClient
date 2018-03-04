@@ -68,15 +68,52 @@ namespace Lennox.AsyncPostgresClient.Pool
         }
     }
 
-    internal static class ObjectPool<T>
+    internal interface IObjectPool<T>
         where T : class
     {
-        public static T Get()
+        T Get();
+        void Free(ref T obj);
+    }
+
+    public struct PoolLease<T> : IDisposable
+        where T : class
+    {
+        // Do not store a reference in the stack that's not scoped inside a
+        // using otherwise using a pool object past freeing is possible.
+        public T Value
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => Volatile.Read(ref _leased);
+        }
+
+        private T _leased;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public PoolLease(T leased)
+        {
+            _leased = leased;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Dispose()
+        {
+            ObjectPool<T>.Default.Free(ref _leased);
+        }
+    }
+
+    internal class ObjectPool<T> : IObjectPool<T>
+        where T : class
+    {
+        public static readonly ObjectPool<T> Default = new ObjectPool<T>();
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public T Get()
         {
             return Activator.CreateInstance<T>();
         }
 
-        public static void Free(ref T obj)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Free(ref T obj)
         {
             var exchanged = Interlocked.Exchange(ref obj, null);
 
@@ -85,6 +122,12 @@ namespace Lennox.AsyncPostgresClient.Pool
                 return;
             }
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static T GetObject() => Default.Get();
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void FreeObject(ref T obj) => Default.Free(ref obj);
     }
 
     internal static class MemoryStreamPool
