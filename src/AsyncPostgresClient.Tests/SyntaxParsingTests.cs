@@ -140,7 +140,7 @@ namespace Lennox.AsyncPostgresClient.Tests
         public void CommandsAreSplit()
         {
             AssertSplit(
-                "select 1; select 2;",
+                "select 1; select 2;  ",
                 "select 1", "select 2");
         }
 
