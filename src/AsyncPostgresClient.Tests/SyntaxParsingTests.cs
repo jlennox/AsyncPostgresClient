@@ -34,7 +34,7 @@ namespace Lennox.AsyncPostgresClient.Tests
             "select @foobar",
             "select $1",
             DisplayName = "select @foobar")]
-        // Ensure parameters are rewritten.
+        // Ensure multiple parameters are rewritten.
         [DataRow(
             "select @foobar, @foobar, @baz",
             "select $1, $1, $2",
@@ -125,6 +125,42 @@ namespace Lennox.AsyncPostgresClient.Tests
             "select $2, -- @foobar\n$1",
             DisplayName = "select @baz, -- @foobar\n@foobar")]
         public void StringsAreSkippedOver(string input, string expected)
+        {
+            AssertEscaped(input, expected);
+        }
+
+        [DataTestMethod]
+        // Terminal dollar sign does not exception.
+        [DataRow(
+            "select $",
+            "select $",
+            DisplayName = "select $")]
+        // Terminal dollar string does not exception.
+        [DataRow(
+            "select $$",
+            "select $$",
+            DisplayName = "select $$")]
+        // Terminal named dollar string does not exception.
+        [DataRow(
+            "select $foo$",
+            "select $foo$",
+            DisplayName = "select $foo$")]
+        // Terminal named dollar string does not exception.
+        [DataRow(
+            "select '",
+            "select '",
+            DisplayName = "select '")]
+        // Terminal escaped string does not cause exception.
+        [DataRow(
+            "select E'\\'",
+            "select E'\\'",
+            DisplayName = "select E'\\'")]
+        // Terminal multiline comment does not cause exception.
+        [DataRow(
+            "select /*",
+            "select /*",
+            DisplayName = "select /*")]
+        public void InvalidSyntaxDoesNotBreakRewritter(string input, string expected)
         {
             AssertEscaped(input, expected);
         }
