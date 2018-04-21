@@ -113,7 +113,30 @@ namespace Lennox.AsyncPostgresClient.Extension
             return length * 4;
         }
 
-        public static unsafe int WriteString(
+        public static int WriteString(
+            this MemoryStream ms, string s, Encoding encoding)
+        {
+            if (string.IsNullOrEmpty(s))
+            {
+                ms.WriteByte(0);
+                return 1;
+            }
+
+            var start = ms.Length;
+            var maxBytes = encoding.GetMaxByteCount(s.Length);
+            ms.SetLength(start + maxBytes);
+            var buffer = ms.GetBuffer();
+
+            var byteCount = encoding.GetBytes(
+                s, 0, s.Length, buffer, (int)start);
+
+            ms.Seek(start + byteCount, SeekOrigin.Begin);
+            ms.WriteByte(0);
+
+            return byteCount + 1;
+        }
+
+        public static unsafe int WriteStringOld(
             this MemoryStream ms, string s, Encoding encoding)
         {
             var buffer = InitializeBuffer();

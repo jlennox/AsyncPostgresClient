@@ -110,7 +110,7 @@ namespace Lennox.AsyncPostgresClient
     {
         public override string ConnectionString { get; set; }
         public override string Database { get; }
-        public override ConnectionState State { get; }
+        public override ConnectionState State => _state;
         public override string DataSource { get; }
         public override string ServerVersion { get; }
 
@@ -140,6 +140,7 @@ namespace Lennox.AsyncPostgresClient
         private int _bufferCount;
 
         private int _isDisposed;
+        private ConnectionState _state;
         private readonly object _disposeSync = new object();
         private readonly CancellationTokenSource _cancel =
             new CancellationTokenSource();
@@ -158,16 +159,54 @@ namespace Lennox.AsyncPostgresClient
             string connectionString,
             bool asyncOnly)
         {
-            PostgresConnectionString = new PostgresConnectionString(connectionString);
+            PostgresConnectionString = new PostgresConnectionString(
+                connectionString);
             _buffer = PostgresDbConnection.GetBuffer();
             _writeBuffer = MemoryStreamPool.Get();
             AsyncOnly = asyncOnly;
         }
 
+        private void ResetBuffer()
+        {
+            _bufferOffset = 0;
+            _bufferCount = 0;
+        }
+
         protected override DbTransaction BeginDbTransaction(
             IsolationLevel isolationLevel)
         {
-            throw new NotImplementedException();
+            string message = null;
+
+            switch (isolationLevel)
+            {
+                case IsolationLevel.Chaos:
+                    goto default;
+                case IsolationLevel.ReadCommitted:
+                    message = "BEGIN READ COMMITTED";
+                    break;
+                case IsolationLevel.ReadUncommitted:
+                    message = "BEGIN READ UNCOMMITTED";
+                    break;
+                case IsolationLevel.RepeatableRead:
+                    message = "BEGIN REPEATABLE READ";
+                    break;
+                case IsolationLevel.Serializable:
+                    message = "BEGIN SERIALIZABLE";
+                    break;
+                case IsolationLevel.Snapshot:
+                    goto default;
+                case IsolationLevel.Unspecified:
+                    message = "BEGIN";
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(
+                        nameof(isolationLevel), isolationLevel, null);
+            }
+
+            SimpleQuery(false, message, CancellationToken.None)
+                .AssertCompleted();
+
+            return new PostgresTransaction(this, isolationLevel);
         }
 
         public override void ChangeDatabase(string databaseName)
@@ -177,13 +216,15 @@ namespace Lennox.AsyncPostgresClient
 
         public override void Close()
         {
+            ResetBuffer();
+            _state = ConnectionState.Closed;
         }
 
         public override void Open()
         {
             CheckAsyncOnly();
 
-            OpenAsync(false, CancellationToken.None).Forget();
+            OpenAsync(false, CancellationToken.None).AssertCompleted();
         }
 
         public override Task OpenAsync(
@@ -206,6 +247,10 @@ namespace Lennox.AsyncPostgresClient
         private async Task OpenAsync(bool async,
             CancellationToken cancellationToken)
         {
+            ResetBuffer();
+
+            _state = ConnectionState.Connecting;
+
             await CreateConnection(cancellationToken)
                 .ConfigureAwait(false);
 
@@ -266,8 +311,10 @@ namespace Lennox.AsyncPostgresClient
                 switch (message)
                 {
                     case BackendKeyDataMessage keyDataMessage:
+                        // TODO: Throw not supported exception?
                         break;
                     case ReadyForQueryMessage readyMessage:
+                        _state = ConnectionState.Open;
                         readyMessage.AssertType(TransactionIndicatorType.Idle);
                         foundIdleMessage = true;
                         break;
@@ -310,14 +357,13 @@ namespace Lennox.AsyncPostgresClient
             }
         }
 
-        internal async Task Query(
+        internal Task Query(
             bool async,
             PostgresCommand command,
             CancellationToken cancellationToken)
         {
             // https://github.com/LuaDist/libpq/blob/4a90601e5d395da904b43116ffb3052e86bdc8ec/src/interfaces/libpq/fe-exec.c#L1365
 
-            BindParameter[] parameters = null;
             var parameterCount = command.Parameters.Count;
 
             if (parameterCount > short.MaxValue)
@@ -326,9 +372,37 @@ namespace Lennox.AsyncPostgresClient
                     $"Too many arguments provided for query. Found {parameterCount}, limit {short.MaxValue}.");
             }
 
-            // TODO
             var queries = command.GetRewrittenCommandText();
-            var queryText = queries[0];
+
+            if (queries.Count == 1)
+            {
+                return QueryCore(async, queries[0], command, cancellationToken);
+            }
+
+            return QueryCore(async, queries, command, cancellationToken);
+        }
+
+        private async Task QueryCore(
+            bool async,
+            IReadOnlyList<string> queries,
+            PostgresCommand command,
+            CancellationToken cancellationToken)
+        {
+            for (var i = 0; i < queries.Count; ++i)
+            {
+                await QueryCore(async, queries[i], command, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+
+        private async Task QueryCore(
+            bool async,
+            string queryText,
+            PostgresCommand command,
+            CancellationToken cancellationToken)
+        {
+            BindParameter[] parameters = null;
+            var parameterCount = command.Parameters.Count;
 
             try
             {
@@ -400,7 +474,8 @@ namespace Lennox.AsyncPostgresClient
                 WriteMessage(new SyncMessage {
                 });
 
-                await FlushWrites(async, cancellationToken).ConfigureAwait(false);
+                await FlushWrites(async, cancellationToken)
+                    .ConfigureAwait(false);
             }
             finally
             {
@@ -463,7 +538,7 @@ namespace Lennox.AsyncPostgresClient
             }
         }
 
-        private async ValueTask<bool> EnsureNextMessageIsReadyForQuery(
+        internal async ValueTask<bool> EnsureNextMessageIsReadyForQuery(
             bool async, CancellationToken cancellationToken)
         {
             var message = await EnsureNextMessage<ReadyForQueryMessage>(
@@ -535,10 +610,10 @@ namespace Lennox.AsyncPostgresClient
                 return new ValueTask<IPostgresMessage>(message);
             }
 
-            return ReadNextMessageCore(async, cancellationToken);
+            return ReadNextMessageAsyncCore(async, cancellationToken);
         }
 
-        private async ValueTask<IPostgresMessage> ReadNextMessageCore(
+        private async ValueTask<IPostgresMessage> ReadNextMessageAsyncCore(
             bool async, CancellationToken cancellationToken)
         {
             using (var kancel = _cancel.Combine(cancellationToken))
@@ -708,6 +783,8 @@ namespace Lennox.AsyncPostgresClient
                 {
                     return;
                 }
+
+                _state = ConnectionState.Closed;
 
                 PostgresDbConnection.FreeBuffer(ref _buffer);
                 MemoryStreamPool.Free(ref _writeBuffer);

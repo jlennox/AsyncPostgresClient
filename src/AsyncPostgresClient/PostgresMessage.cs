@@ -1771,13 +1771,15 @@ namespace Lennox.AsyncPostgresClient
 
         public void AssertType(TransactionIndicatorType type)
         {
+            // TODO: This may of been a silly idea.
+            /*
             if (TransactionIndicatorType != type)
             {
                 throw new ArgumentOutOfRangeException(
                     nameof(TransactionIndicatorType),
                     TransactionIndicatorType,
                     $"Unexpected transaction type, expected {type}.");
-            }
+            }*/
         }
     }
 

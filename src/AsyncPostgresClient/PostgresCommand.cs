@@ -55,12 +55,6 @@ namespace Lennox.AsyncPostgresClient
             throw new NotImplementedException();
         }
 
-        public override int ExecuteNonQuery()
-        {
-            _connection.CheckAsyncOnly();
-            throw new NotImplementedException();
-        }
-
         public override void Prepare()
         {
             throw new NotImplementedException();
@@ -168,7 +162,22 @@ namespace Lennox.AsyncPostgresClient
         public override Task<int> ExecuteNonQueryAsync(
             CancellationToken cancellationToken)
         {
-            throw new NotImplementedException();
+            return ExecuteNonQuery(true, cancellationToken);
+        }
+
+        public override int ExecuteNonQuery()
+        {
+            _connection.CheckAsyncOnly();
+            return ExecuteNonQuery(false, CancellationToken.None)
+                .CompletedTaskValue();
+        }
+
+        private async Task<int> ExecuteNonQuery(
+            bool async, CancellationToken cancellationToken)
+        {
+            var result = await ExecuteScalar(async, cancellationToken)
+                .ConfigureAwait(false);
+            return result is int i ? i : 0;
         }
 
         internal async ValueTask<bool> ExecuteUntilFinished(

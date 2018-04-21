@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -55,210 +57,92 @@ namespace Lennox.AsyncPostgresClient.Tests
             }
         }
 
-        [DataTestMethod]
-        [DataRow(false, DisplayName = "Text results")]
-        [DataRow(true, DisplayName = "Binary results")]
-        public async Task TestExecuteReaderAsync(bool useBinary)
+        class TempUser
         {
-            var cancel = CancellationToken.None;
+            public int Id { get; set; }
+            public string Name { get; set; }
+            public string Location { get; set; }
 
-            using (var connection = await PostgresServerInformation.Open())
-            using (var command = new PostgresCommand(
-                "SELECT 0::int2, 1::int4, 2::int8, true, false, 4.6 as foobar, null", connection))
+            public Collection<TempUserInfo> Infos { get; set; }
+
+            public TempUser()
             {
-                connection.QueryResultFormat = useBinary
-                    ? PostgresFormatCode.Binary
-                    : PostgresFormatCode.Text;
-
-                var reader = await command.ExecuteReaderAsync(cancel);
-
-                Assert.IsTrue(await reader.ReadAsync(cancel));
-                Assert.AreEqual(7, reader.FieldCount);
-
-                Assert.AreEqual(0, reader.GetInt16(0));
-                Assert.AreEqual((short)0, reader.GetValue(0));
-
-                Assert.AreEqual(1, reader.GetInt32(1));
-                Assert.AreEqual(1, reader.GetValue(1));
-
-                Assert.AreEqual(2, reader.GetInt64(2));
-                Assert.AreEqual(2L, reader.GetValue(2));                
-
-                Assert.AreEqual(true, reader.GetBoolean(3));
-                Assert.AreEqual(true, reader.GetValue(3));
-                Assert.AreEqual(false, reader.GetBoolean(4));
-                Assert.AreEqual(false, reader.GetValue(4));
-
-                Assert.AreEqual(4.6m, reader.GetDecimal(5));
-                Assert.AreEqual(4.6m, reader.GetValue(5));
-                Assert.AreEqual(4.6m, reader["foobar"]);
-
-                Assert.AreEqual(DBNull.Value, reader.GetValue(6));
-
-                Assert.ThrowsException<IndexOutOfRangeException>(
-                    () => reader[999]);
-
-                Assert.ThrowsException<IndexOutOfRangeException>(
-                    () => reader["does not exist"]);
-
-                Assert.IsFalse(await reader.ReadAsync(cancel));
+                Infos = new Collection<TempUserInfo>();
             }
         }
 
-        [DataTestMethod]
-        [DataRow(false, DisplayName = "Text results")]
-        [DataRow(true, DisplayName = "Binary results")]
-        public async Task BasicTestNumericTypes(bool useBinary)
+        class TempUserInfo
         {
-            var cancel = CancellationToken.None;
-
-            using (var connection = await PostgresServerInformation.Open())
-            using (var command = new PostgresCommand(
-                "SELECT 500.5::numeric, 500.5::float4, 500.5::float8, 500.5::money", connection))
-            {
-                connection.QueryResultFormat = useBinary
-                    ? PostgresFormatCode.Binary
-                    : PostgresFormatCode.Text;
-
-                var reader = await command.ExecuteReaderAsync(cancel);
-                Assert.IsTrue(await reader.ReadAsync(cancel));
-
-                Assert.Inconclusive("TODO: Write this test");
-
-                Assert.IsFalse(await reader.ReadAsync(cancel));
-            }
+            public int Id { get; set; }
+            public int UserId { get; set; }
+            public string Text { get; set; }
         }
 
-        [DataTestMethod]
-        [DataRow(false, "float4", DisplayName = "Text float4 results")]
-        [DataRow(true, "float4", DisplayName = "Binary float4 results")]
-        [DataRow(false, "float8", DisplayName = "Text float8 results")]
-        [DataRow(true, "float8", DisplayName = "Binary float8 results")]
-        public async Task FloatingPointTest(bool useBinary, string floatFormat)
+        [TestMethod]
+        public async Task TestQuery()
         {
-            DebugLogger.Enabled = true;
-
-            var cancel = CancellationToken.None;
-
-            const decimal precision = 0.001m;
-
             using (var connection = await PostgresServerInformation.Open())
+            using (var transaction = connection.BeginTransaction())
             {
-                await connection.SendPropertyAsync(cancel,
-                    new PostgresPropertySetting(
-                        PostgresPropertyName.ExtraFloatDigits,
-                        "3"));
+                const string schema = @"
+                    CREATE TEMP TABLE tempUser (id int4, name text, location text);
 
-                using (var command = new PostgresCommand(
-                    $"SELECT 123456789.005::{floatFormat}, 500.0123456789::{floatFormat}", connection))
-                {
-                    connection.QueryResultFormat = useBinary
-                        ? PostgresFormatCode.Binary
-                        : PostgresFormatCode.Text;
+                    INSERT INTO tempUser (id, name, location) VALUES
+                    (0, 'guy one', 'Mars'),
+                    (1, 'guy two', 'Jupiter'),
+                    (2, 'guy three', 'Venus');
 
-                    var reader = await command.ExecuteReaderAsync(cancel);
-                    Assert.IsTrue(await reader.ReadAsync(cancel));
+                    CREATE TEMP TABLE tempUserInfo (id int4, user_id int4, info text);
 
-                    switch (floatFormat)
-                    {
-                        case "float4":
-                            var val1 = reader.GetFloat(0);
-                            var val2 = reader.GetFloat(1);
-                            NumericAsserts.FloatEquals(123456789.005f, val1, precision);
-                            NumericAsserts.FloatEquals(500.012f, val2, precision);
-                            break;
-                        case "float8":
-                            var valb1 = reader.GetDouble(0);
-                            var valb2 = reader.GetDouble(1);
-                            NumericAsserts.FloatEquals(123456789.005, valb1, precision);
-                            NumericAsserts.FloatEquals(500.012f, valb2, precision);
-                            break;
-                        default:
-                            throw new ArgumentOutOfRangeException(floatFormat);
-                    }
+                    INSERT INTO tempUserInfo (id, user_id, info) VALUES
+                    (0, 0, 'info one'),
+                    (1, 0, 'info two'),
+                    (2, 0, 'info three'),
+                    (3, 1, 'info one'),
+                    (4, 1, 'info two');";
 
-                    Assert.IsFalse(await reader.ReadAsync(cancel));
-                }
-            }
-        }
+                await connection.ExecuteAsync(schema);
 
-        [DataTestMethod]
-        [DataRow(false, DisplayName = "Text results")]
-        [DataRow(true, DisplayName = "Binary results")]
-        public async Task BasicTestTimeTypes(bool useBinary)
-        {
-            var cancel = CancellationToken.None;
+                const string query = @"
+                    SELECT *
+                    FROM tempUser
+                    LEFT JOIN tempUserInfo ON (tempUserInfo.user_id = tempUser.id)";
 
-            using (var connection = await PostgresServerInformation.Open())
-            using (var command = new PostgresCommand(
-                "SELECT '2001-09-27 23:00:00'::timestamp, '2002-10-28'::date at time zone 'PST'", connection))
-            {
-                connection.QueryResultFormat = useBinary
-                    ? PostgresFormatCode.Binary
-                    : PostgresFormatCode.Text;
+                var userLookup = new Dictionary<int, TempUser>();
 
-                var reader = await command.ExecuteReaderAsync(cancel);
+                await connection
+                    .QueryAsync<TempUser, TempUserInfo, TempUser>(
+                        query, (user, info) => {
+                            if (!userLookup.TryGetValue(user.Id, out var found))
+                            {
+                                found = user;
+                                userLookup[user.Id] = user;
+                            }
 
-                Assert.Inconclusive("TODO: Write this test");
+                            if (info != null)
+                            {
+                                found.Infos.Add(info);
+                            }
 
-                Assert.IsFalse(await reader.ReadAsync(cancel));
-            }
-        }
+                            return found;
+                        });
 
-        [DataTestMethod]
-        [DataRow(false, DisplayName = "Text results")]
-        [DataRow(true, DisplayName = "Binary results")]
-        public async Task BasicTestDateTypes(bool useBinary)
-        {
-            var cancel = CancellationToken.None;
+                var users = userLookup.Values.ToArray();
 
-            using (var connection = await PostgresServerInformation.Open())
-            using (var command = new PostgresCommand(
-                "SELECT '2001-09-27'::date", connection))
-            {
-                connection.QueryResultFormat = useBinary
-                    ? PostgresFormatCode.Binary
-                    : PostgresFormatCode.Text;
+                Assert.AreEqual(3, users.Length);
+                var guyOne = users.Single(t => t.Id == 0);
+                var guyTwo = users.Single(t => t.Id == 1);
+                var guyThree = users.Single(t => t.Id == 2);
 
-                var reader = await command.ExecuteReaderAsync(cancel);
-                Assert.IsTrue(await reader.ReadAsync(cancel));
+                Assert.AreEqual(3, guyOne.Infos.Count);
+                Assert.AreEqual(2, guyTwo.Infos.Count);
+                Assert.AreEqual(0, guyThree.Infos.Count);
 
-                var date = (DateTime)reader[0];
-
-                Assert.AreEqual(2001, date.Year);
-                Assert.AreEqual(9, date.Month);
-                Assert.AreEqual(27, date.Day);
-                Assert.AreEqual(DateTimeKind.Utc, date.Kind);
-
-                Assert.IsFalse(await reader.ReadAsync(cancel));
-            }
-        }
-
-        [DataTestMethod]
-        [DataRow(false, DisplayName = "Text results")]
-        [DataRow(true, DisplayName = "Binary results")]
-        public async Task BasicTestGuidTypes(bool useBinary)
-        {
-            var cancel = CancellationToken.None;
-
-            using (var connection = await PostgresServerInformation.Open())
-            using (var command = new PostgresCommand(
-                "SELECT 'AC426679-CD6A-4571-A519-C4DD7691C63C'::uuid", connection))
-            {
-                connection.QueryResultFormat = useBinary
-                    ? PostgresFormatCode.Binary
-                    : PostgresFormatCode.Text;
-
-                var reader = await command.ExecuteReaderAsync(cancel);
-                Assert.IsTrue(await reader.ReadAsync(cancel));
-
-                var guid = (Guid)reader[0];
-
-                Assert.AreEqual(
-                    Guid.Parse("AC426679-CD6A-4571-A519-C4DD7691C63C"),
-                    guid);
-
-                Assert.IsFalse(await reader.ReadAsync(cancel));
+                Assert.IsTrue(guyOne.Infos.Any(t => t.Text == "info one"));
+                Assert.IsTrue(guyOne.Infos.Any(t => t.Text == "info two"));
+                Assert.IsTrue(guyOne.Infos.Any(t => t.Text == "info three"));
+                Assert.IsTrue(guyTwo.Infos.Any(t => t.Text == "info one"));
+                Assert.IsTrue(guyTwo.Infos.Any(t => t.Text == "info two"));
             }
         }
     }

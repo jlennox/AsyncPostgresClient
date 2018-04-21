@@ -65,6 +65,7 @@ namespace Lennox.AsyncPostgresClient
         private bool _hasRows;
         private bool _isClosed = false;
         private int _depth = 0;
+        private bool _hasNoData;
 
         private readonly PostgresDbConnectionBase _connection;
         private readonly PostgresCommand _command;
@@ -337,6 +338,7 @@ namespace Lennox.AsyncPostgresClient
             return Read(true, cancellationToken).AsTask();
         }
 
+        // TODO: Why was this made to return a bool?
         internal async ValueTask<bool> ReadUntilData(
             bool async, CancellationToken cancellationToken)
         {
@@ -359,11 +361,14 @@ namespace Lennox.AsyncPostgresClient
                     case BindCompleteMessage bindCompleteMessage:
                         // TODO: Do something?
                         continue;
+                    case NoDataMessage noDataMessage:
+                        _hasNoData = true;
+                        return false;
                     case RowDescriptionMessage descriptionMessage:
                         _descriptionMessage?.TryDispose();
                         _fieldCount = descriptionMessage.FieldCount;
                         _descriptionMessage = descriptionMessage;
-                        return true;;
+                        return true;
                     default:
                         throw new PostgresInvalidMessageException(message);
                 }
@@ -374,6 +379,11 @@ namespace Lennox.AsyncPostgresClient
             bool async, CancellationToken cancellationToken)
         {
             CheckIsClosed();
+
+            if (_hasNoData)
+            {
+                return false;
+            }
 
             // https://www.postgresql.org/docs/10/static/protocol-flow.html#idm46428663987712
             while (true)
@@ -388,9 +398,12 @@ namespace Lennox.AsyncPostgresClient
                 {
                     case ParseCompleteMessage parseCompleteMessage:
                         // TODO: Do something?
+                        // Next message is BindCompleteMessage.
                         continue;
                     case BindCompleteMessage bindCompleteMessage:
                         // TODO: Do something?
+                        // Next message is RowDescriptionMessage or
+                        // EmptyQueryResponseMessage.
                         continue;
                     case CommandCompleteMessage completedMessage:
                         _commandCompleted = true;
@@ -401,6 +414,7 @@ namespace Lennox.AsyncPostgresClient
                             return false;
                         }
 
+                        // Next message is ReadyForQueryMessage.
                         continue;
                     case CopyInResponseMessage copyInMessage:
                         throw new NotImplementedException();
@@ -423,6 +437,7 @@ namespace Lennox.AsyncPostgresClient
                         // is EmptyQueryResponse followed by ReadyForQuery."
                         _hasRows = false;
                         _commandCompleted = true;
+                        // Next message is ReadyForQueryMessage.
                         continue;
                     case ReadyForQueryMessage readyMessage:
                         if (!_commandCompleted)

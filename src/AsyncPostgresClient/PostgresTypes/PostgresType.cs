@@ -18,7 +18,7 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
     internal class PostgresTypeCollection
     {
         // https://www.postgresql.org/docs/9.2/static/catalog-pg-type.html
-        private const string _query = "select typname, typtype, oid from pg_type;";
+        private const string _query = "SELECT typname, typtype, oid FROM pg_type;";
 
         private enum ResultIndex
         {
