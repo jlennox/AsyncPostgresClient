@@ -375,6 +375,15 @@ namespace Lennox.AsyncPostgresClient
             }
         }
 
+        internal async Task ReadToEnd(
+            bool async, CancellationToken cancellationToken)
+        {
+            while (await Read(async, cancellationToken)
+                .ConfigureAwait(false))
+            {
+            }
+        }
+
         internal async ValueTask<bool> Read(
             bool async, CancellationToken cancellationToken)
         {

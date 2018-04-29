@@ -206,6 +206,13 @@ namespace Lennox.AsyncPostgresClient
             SimpleQuery(false, message, CancellationToken.None)
                 .AssertCompleted();
 
+            EnsureNextMessage<CommandCompleteMessage>(
+                    false, CancellationToken.None)
+                .AssertCompleted();
+
+            EnsureNextMessageIsReadyForQuery(false, CancellationToken.None)
+                .AssertCompleted();
+
             return new PostgresTransaction(this, isolationLevel);
         }
 
@@ -392,6 +399,25 @@ namespace Lennox.AsyncPostgresClient
             {
                 await QueryCore(async, queries[i], command, cancellationToken)
                     .ConfigureAwait(false);
+
+                var isLast = i == queries.Count - 1;
+
+                // This pattern is kind of silly. Ideally, it shouldn't be
+                // permitted to execute multiple commands in a single query.
+                if (!isLast)
+                {
+                    while (true)
+                    {
+                        var message = await ReadNextMessage(
+                            async, cancellationToken)
+                        .ConfigureAwait(false);
+
+                        if (message is CommandCompleteMessage)
+                        {
+                            break;
+                        }
+                    }
+                }
             }
         }
 
@@ -427,8 +453,8 @@ namespace Lennox.AsyncPostgresClient
                             continue;
                         }
 
-                        // TODO: This allocation fest terrible. Make this write
-                        // directly to the memorystream instead of having
+                        // TODO: This allocation fest is terrible. Make this
+                        // write directly to the memorystream instead of having
                         // intermittent buffers for everything.
 
                         var paramString = param.ToString();
@@ -493,21 +519,11 @@ namespace Lennox.AsyncPostgresClient
         internal async Task SimpleQuery(
             bool async, string query, CancellationToken cancellationToken)
         {
-            // NOTE: Marked for demolition?
-
             WriteMessage(new QueryMessage {
                 Query = query
             });
 
             await FlushWrites(async, cancellationToken).ConfigureAwait(false);
-
-            await EnsureNextMessage<CommandCompleteMessage>(
-                    async, cancellationToken)
-                .ConfigureAwait(false);
-
-            await EnsureNextMessageIsReadyForQuery(
-                    async, cancellationToken)
-                .ConfigureAwait(false);
         }
 
         public PostgresCommand CreateCommand(string command)
@@ -744,7 +760,8 @@ namespace Lennox.AsyncPostgresClient
             }
 
             _typeCollection = await PostgresTypeCollection
-                .Create(async, this, cancellationToken).ConfigureAwait(false);
+                .Create(async, this, cancellationToken)
+                .ConfigureAwait(false);
 
             return _typeCollection;
         }

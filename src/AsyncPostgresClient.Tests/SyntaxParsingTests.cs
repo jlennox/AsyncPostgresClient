@@ -231,5 +231,22 @@ namespace Lennox.AsyncPostgresClient.Tests
                     PostgresProperties.StandardConformingStrings, "on")
             });
         }
+
+        [DataTestMethod]
+        [DataRow("INSERT 0 5", 5)]
+        [DataRow("INSERT 0 5123", 5123)]
+        [DataRow("INSERT 0 asd", null)]
+        [DataRow(null, null)]
+        [DataRow("", null)]
+        [DataRow("invalid", null)]
+        [DataRow("5", null)]
+        public void ParseNumericValueFromNonQueryResponseTests(
+            string s, int? expected)
+        {
+            var result = PostgresCommand
+                .ParseNumericValueFromNonQueryResponse(s);
+
+            Assert.AreEqual(expected, result);
+        }
     }
 }

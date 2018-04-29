@@ -6,6 +6,8 @@ using System.Threading;
 
 namespace Lennox.AsyncPostgresClient.Pool
 {
+    // NOTE: All pooling code is placeholders that will be later reworked.
+
     // https://github.com/dotnet/coreclr/tree/master/src/mscorlib/shared/System/Buffers
     internal static class ArrayPool
     {

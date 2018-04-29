@@ -75,7 +75,55 @@ namespace Lennox.AsyncPostgresClient.Tests
         {
             public int Id { get; set; }
             public int UserId { get; set; }
-            public string Text { get; set; }
+            public string Info { get; set; }
+        }
+
+        private static async Task CreateTempUsers(
+            PostgresDbConnection connection)
+        {
+            const string schema = @"
+                CREATE TEMP TABLE tempUser (id int4, name text, location text);
+
+                INSERT INTO tempUser (id, name, location) VALUES
+                (0, 'guy one', 'Mars'),
+                (1, 'guy two', 'Jupiter'),
+                (2, 'guy three', 'Venus');
+
+                CREATE TEMP TABLE tempUserInfo (id int4, user_id int4, info text);
+
+                INSERT INTO tempUserInfo (id, user_id, info) VALUES
+                (0, 0, 'info one'),
+                (1, 0, 'info two'),
+                (2, 0, 'info three'),
+                (3, 1, 'info one'),
+                (4, 1, 'info two');";
+
+            await connection.ExecuteAsync(schema);
+        }
+
+        private static async Task<TempUser[]> ReadTempUsers(
+            PostgresDbConnection connection, string query, object param)
+        {
+            var userLookup = new Dictionary<int, TempUser>();
+
+            await connection
+                .QueryAsync<TempUser, TempUserInfo, TempUser>(
+                    query, (user, info) => {
+                        if (!userLookup.TryGetValue(user.Id, out var found))
+                        {
+                            found = user;
+                            userLookup[user.Id] = user;
+                        }
+
+                        if (info != null)
+                        {
+                            found.Infos.Add(info);
+                        }
+
+                        return found;
+                    }, param);
+
+            return userLookup.Values.ToArray();
         }
 
         [TestMethod]
@@ -84,50 +132,14 @@ namespace Lennox.AsyncPostgresClient.Tests
             using (var connection = await PostgresServerInformation.Open())
             using (var transaction = connection.BeginTransaction())
             {
-                const string schema = @"
-                    CREATE TEMP TABLE tempUser (id int4, name text, location text);
-
-                    INSERT INTO tempUser (id, name, location) VALUES
-                    (0, 'guy one', 'Mars'),
-                    (1, 'guy two', 'Jupiter'),
-                    (2, 'guy three', 'Venus');
-
-                    CREATE TEMP TABLE tempUserInfo (id int4, user_id int4, info text);
-
-                    INSERT INTO tempUserInfo (id, user_id, info) VALUES
-                    (0, 0, 'info one'),
-                    (1, 0, 'info two'),
-                    (2, 0, 'info three'),
-                    (3, 1, 'info one'),
-                    (4, 1, 'info two');";
-
-                await connection.ExecuteAsync(schema);
+                await CreateTempUsers(connection);
 
                 const string query = @"
                     SELECT *
                     FROM tempUser
                     LEFT JOIN tempUserInfo ON (tempUserInfo.user_id = tempUser.id)";
 
-                var userLookup = new Dictionary<int, TempUser>();
-
-                await connection
-                    .QueryAsync<TempUser, TempUserInfo, TempUser>(
-                        query, (user, info) => {
-                            if (!userLookup.TryGetValue(user.Id, out var found))
-                            {
-                                found = user;
-                                userLookup[user.Id] = user;
-                            }
-
-                            if (info != null)
-                            {
-                                found.Infos.Add(info);
-                            }
-
-                            return found;
-                        });
-
-                var users = userLookup.Values.ToArray();
+                var users = await ReadTempUsers(connection, query, null);
 
                 Assert.AreEqual(3, users.Length);
                 var guyOne = users.Single(t => t.Id == 0);
@@ -138,11 +150,82 @@ namespace Lennox.AsyncPostgresClient.Tests
                 Assert.AreEqual(2, guyTwo.Infos.Count);
                 Assert.AreEqual(0, guyThree.Infos.Count);
 
-                Assert.IsTrue(guyOne.Infos.Any(t => t.Text == "info one"));
-                Assert.IsTrue(guyOne.Infos.Any(t => t.Text == "info two"));
-                Assert.IsTrue(guyOne.Infos.Any(t => t.Text == "info three"));
-                Assert.IsTrue(guyTwo.Infos.Any(t => t.Text == "info one"));
-                Assert.IsTrue(guyTwo.Infos.Any(t => t.Text == "info two"));
+                Assert.AreEqual("guy one", guyOne.Name);
+                Assert.AreEqual("guy two", guyTwo.Name);
+                Assert.AreEqual("guy three", guyThree.Name);
+
+                Assert.AreEqual("Mars", guyOne.Location);
+                Assert.AreEqual("Jupiter", guyTwo.Location);
+                Assert.AreEqual("Venus", guyThree.Location);
+
+                Assert.IsTrue(guyOne.Infos.Any(t => t.Info == "info one"));
+                Assert.IsTrue(guyOne.Infos.Any(t => t.Info == "info two"));
+                Assert.IsTrue(guyOne.Infos.Any(t => t.Info == "info three"));
+                Assert.IsTrue(guyTwo.Infos.Any(t => t.Info == "info one"));
+                Assert.IsTrue(guyTwo.Infos.Any(t => t.Info == "info two"));
+            }
+        }
+
+        [TestMethod]
+        public async Task TestParameterizedQuery()
+        {
+            using (var connection = await PostgresServerInformation.Open())
+            using (var transaction = connection.BeginTransaction())
+            {
+                await CreateTempUsers(connection);
+
+                const string query = @"
+                    SELECT *
+                    FROM tempUser
+                    LEFT JOIN tempUserInfo ON (tempUserInfo.user_id = tempUser.id)";
+
+                {
+                    var withWhere = query + @"
+                        WHERE tempUser.id = @Id";
+
+                    var users = await ReadTempUsers(
+                        connection, withWhere, new {
+                            Id = 1
+                        });
+
+                    Assert.AreEqual(1, users.Length);
+                    Assert.AreEqual("guy two", users.Single().Name);
+                }
+
+                {
+                    var withWhere = query + @"
+                        WHERE tempUser.name = @Name";
+
+                    var users = await ReadTempUsers(
+                        connection, withWhere, new {
+                            Name = "guy two"
+                        });
+
+                    Assert.AreEqual(1, users.Length);
+                    Assert.AreEqual("guy two", users.Single().Name);
+
+                    var noResults = await ReadTempUsers(
+                        connection, withWhere, new {
+                            Name = "Invalid name"
+                        });
+
+                    Assert.AreEqual(0, noResults.Length);
+
+
+                    var nullResults = await ReadTempUsers(
+                        connection, withWhere, new {
+                            Name = (string)null
+                        });
+
+                    Assert.AreEqual(0, nullResults.Length);
+
+                    var escapeAttempts = await ReadTempUsers(
+                        connection, withWhere, new {
+                            Name = "\"'$FOOBVAR$$$"
+                        });
+
+                    Assert.AreEqual(0, escapeAttempts.Length);
+                }
             }
         }
     }

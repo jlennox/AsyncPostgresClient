@@ -20,7 +20,7 @@ namespace Lennox.AsyncPostgresClient
             IsolationLevel isolationLevel)
         {
             _connection = connection;
-            IsolationLevel = IsolationLevel;
+            IsolationLevel = isolationLevel;
         }
 
         public override void Commit()

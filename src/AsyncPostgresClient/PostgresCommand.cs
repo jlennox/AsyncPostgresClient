@@ -5,6 +5,7 @@ using System.Data.Common;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
+using Lennox.AsyncPostgresClient.Exceptions;
 using Lennox.AsyncPostgresClient.Extension;
 using Lennox.AsyncPostgresClient.PostgresTypes;
 
@@ -96,7 +97,12 @@ namespace Lennox.AsyncPostgresClient
                     return null;
                 }
 
-                return reader.GetValue(0);
+                var result = reader.GetValue(0);
+
+                await reader.ReadToEnd(async, cancellationToken)
+                    .ConfigureAwait(false);
+
+                return result;
             }
         }
 
@@ -159,6 +165,36 @@ namespace Lennox.AsyncPostgresClient
             return reader;
         }
 
+        internal async ValueTask<CommandCompleteMessage> ExecuteSimpleCommand(
+            bool async,
+            CancellationToken cancellationToken)
+        {
+            await _connection.SimpleQuery(async, _command, cancellationToken)
+                .ConfigureAwait(false);
+
+            var lastCompleteMessage = default(CommandCompleteMessage);
+
+            while (true)
+            {
+                var message = await _connection.
+                    ReadNextMessage(async, cancellationToken)
+                    .ConfigureAwait(false);
+
+                switch (message)
+                {
+                    case CommandCompleteMessage completeMessage:
+                        // If multiple commands were separated by semi-colons
+                        // then multiple CommandCompleteMessage will arrive.
+                        lastCompleteMessage = completeMessage;
+                        break;
+                    case ReadyForQueryMessage _:
+                        return lastCompleteMessage;
+                    default:
+                        throw new PostgresInvalidMessageException(message);
+                }
+            }
+        }
+
         public override Task<int> ExecuteNonQueryAsync(
             CancellationToken cancellationToken)
         {
@@ -175,9 +211,34 @@ namespace Lennox.AsyncPostgresClient
         private async Task<int> ExecuteNonQuery(
             bool async, CancellationToken cancellationToken)
         {
-            var result = await ExecuteScalar(async, cancellationToken)
+            var completeMessage = await ExecuteSimpleCommand(
+                    async, cancellationToken)
                 .ConfigureAwait(false);
-            return result is int i ? i : 0;
+
+            return ParseNumericValueFromNonQueryResponse(
+                completeMessage.Tag) ?? 0;
+        }
+
+        internal static int? ParseNumericValueFromNonQueryResponse(string s)
+        {
+            // TODO: Fix the allocations here.
+            // Example: INSERT 0 5
+
+            if (string.IsNullOrEmpty(s))
+            {
+                return null;
+            }
+
+            var lastSpace = s.LastIndexOf(' ');
+
+            if (lastSpace == -1)
+            {
+                return null;
+            }
+
+            var lastWord = s.Substring(lastSpace);
+
+            return int.TryParse(lastWord, out var val) ? val : (int?)null;
         }
 
         internal async ValueTask<bool> ExecuteUntilFinished(

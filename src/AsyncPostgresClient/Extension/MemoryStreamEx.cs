@@ -12,7 +12,7 @@ namespace Lennox.AsyncPostgresClient.Extension
         [ThreadStatic]
         private static byte[] _tempBuffer;
 
-        private const int _tempBufferSize = 512;
+        private const int _tempBufferSize = 8;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static byte[] InitializeBuffer()
@@ -136,6 +136,8 @@ namespace Lennox.AsyncPostgresClient.Extension
             return byteCount + 1;
         }
 
+        // If this ever gets brought back, increase _tempBufferSize to at
+        // least 512 bytes.
         public static unsafe int WriteStringOld(
             this MemoryStream ms, string s, Encoding encoding)
         {
