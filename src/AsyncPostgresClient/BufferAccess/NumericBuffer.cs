@@ -11,113 +11,95 @@ namespace Lennox.AsyncPostgresClient.BufferAccess
         public static unsafe bool TryAsciiToInt(
             byte[] data, int offset, int length, out int number)
         {
+            fixed (byte* pt = &data[offset])
+            {
+                return TryAsciiToInt(pt, length, out number);
+            }
+        }
+
+       public static unsafe bool TryAsciiToInt(
+            byte* pt, int length, out int number)
+        {
             switch (length)
             {
                 case 0:
                     number = 0;
                     return true;
                 case 1:
-                    number = data[offset] & 0xF;
+                    number = pt[0] & 0xF;
                     return true;
                 case 2:
-                    fixed (byte* pt = &data[offset])
-                    {
-                        number = (pt[0] & 0xF) * 10 +
-                            (pt[1] & 0xF);
-                        return true;
-                    }
+                    number = (pt[0] & 0xF) * 10 +
+                        (pt[1] & 0xF);
+                    return true;
                 case 3:
-                    fixed (byte* pt = &data[offset])
-                    {
-                        number = (pt[0] & 0xF) * 100 +
-                            (pt[1] & 0xF) * 10 +
-                            (pt[2] & 0xF);
-                        return true;
-                    }
+                    number = (pt[0] & 0xF) * 100 +
+                        (pt[1] & 0xF) * 10 +
+                        (pt[2] & 0xF);
+                    return true;
                 case 4:
-                    fixed (byte* pt = &data[offset])
-                    {
-                        number = (pt[0] & 0xF) * 1000 +
-                            (pt[1] & 0xF) * 100 +
-                            (pt[2] & 0xF) * 10 +
-                            (pt[3] & 0xF);
-                        return true;
-                    }
+                    number = (pt[0] & 0xF) * 1000 +
+                        (pt[1] & 0xF) * 100 +
+                        (pt[2] & 0xF) * 10 +
+                        (pt[3] & 0xF);
+                    return true;
                 case 5:
-                    fixed (byte* pt = &data[offset])
-                    {
-                        number = (pt[0] & 0xF) * 10000 +
-                            (pt[1] & 0xF) * 1000 +
-                            (pt[2] & 0xF) * 100 +
-                            (pt[3] & 0xF) * 10 +
-                            (pt[4] & 0xF);
-                        return true;
-                    }
+                    number = (pt[0] & 0xF) * 10000 +
+                        (pt[1] & 0xF) * 1000 +
+                        (pt[2] & 0xF) * 100 +
+                        (pt[3] & 0xF) * 10 +
+                        (pt[4] & 0xF);
+                    return true;
                 case 6:
-                    fixed (byte* pt = &data[offset])
-                    {
-                        number = (pt[0] & 0xF) * 100000 +
-                            (pt[1] & 0xF) * 10000 +
-                            (pt[2] & 0xF) * 1000 +
-                            (pt[3] & 0xF) * 100 +
-                            (pt[4] & 0xF) * 10 +
-                            (pt[5] & 0xF);
-                        return true;
-                    }
+                    number = (pt[0] & 0xF) * 100000 +
+                        (pt[1] & 0xF) * 10000 +
+                        (pt[2] & 0xF) * 1000 +
+                        (pt[3] & 0xF) * 100 +
+                        (pt[4] & 0xF) * 10 +
+                        (pt[5] & 0xF);
+                    return true;
                 case 7:
-                    fixed (byte* pt = &data[offset])
-                    {
-                        number = (pt[0] & 0xF) * 1000000 +
-                            (pt[1] & 0xF) * 100000 +
-                            (pt[2] & 0xF) * 10000 +
-                            (pt[3] & 0xF) * 1000 +
-                            (pt[4] & 0xF) * 100 +
-                            (pt[5] & 0xF) * 10 +
-                            (pt[6] & 0xF);
-                        return true;
-                    }
+                    number = (pt[0] & 0xF) * 1000000 +
+                        (pt[1] & 0xF) * 100000 +
+                        (pt[2] & 0xF) * 10000 +
+                        (pt[3] & 0xF) * 1000 +
+                        (pt[4] & 0xF) * 100 +
+                        (pt[5] & 0xF) * 10 +
+                        (pt[6] & 0xF);
+                    return true;
                 case 8:
-                    fixed (byte* pt = &data[offset])
-                    {
-                        number = (pt[0] & 0xF) * 10000000 +
-                            (pt[1] & 0xF) * 1000000 +
-                            (pt[2] & 0xF) * 100000 +
-                            (pt[3] & 0xF) * 10000 +
-                            (pt[4] & 0xF) * 1000 +
-                            (pt[5] & 0xF) * 100 +
-                            (pt[6] & 0xF) * 10 +
-                            (pt[7] & 0xF);
-                        return true;
-                    }
+                    number = (pt[0] & 0xF) * 10000000 +
+                        (pt[1] & 0xF) * 1000000 +
+                        (pt[2] & 0xF) * 100000 +
+                        (pt[3] & 0xF) * 10000 +
+                        (pt[4] & 0xF) * 1000 +
+                        (pt[5] & 0xF) * 100 +
+                        (pt[6] & 0xF) * 10 +
+                        (pt[7] & 0xF);
+                    return true;
                 case 9:
-                    fixed (byte* pt = &data[offset])
-                    {
-                        number = (pt[0] & 0xF) * 100000000 +
-                            (pt[1] & 0xF) * 10000000 +
-                            (pt[2] & 0xF) * 1000000 +
-                            (pt[3] & 0xF) * 100000 +
-                            (pt[4] & 0xF) * 10000 +
-                            (pt[5] & 0xF) * 1000 +
-                            (pt[6] & 0xF) * 100 +
-                            (pt[7] & 0xF) * 10 +
-                            (pt[8] & 0xF);
-                        return true;
-                    }
+                    number = (pt[0] & 0xF) * 100000000 +
+                        (pt[1] & 0xF) * 10000000 +
+                        (pt[2] & 0xF) * 1000000 +
+                        (pt[3] & 0xF) * 100000 +
+                        (pt[4] & 0xF) * 10000 +
+                        (pt[5] & 0xF) * 1000 +
+                        (pt[6] & 0xF) * 100 +
+                        (pt[7] & 0xF) * 10 +
+                        (pt[8] & 0xF);
+                    return true;
                 case 10:
-                    fixed (byte* pt = &data[offset])
-                    {
-                        number = (pt[0] & 0xF) * 1000000000 +
-                            (pt[1] & 0xF) * 100000000 +
-                            (pt[2] & 0xF) * 10000000 +
-                            (pt[3] & 0xF) * 1000000 +
-                            (pt[4] & 0xF) * 100000 +
-                            (pt[5] & 0xF) * 10000 +
-                            (pt[6] & 0xF) * 1000 +
-                            (pt[7] & 0xF) * 100 +
-                            (pt[8] & 0xF) * 10 +
-                            (pt[9] & 0xF);
-                        return true;
-                    }
+                    number = (pt[0] & 0xF) * 1000000000 +
+                        (pt[1] & 0xF) * 100000000 +
+                        (pt[2] & 0xF) * 10000000 +
+                        (pt[3] & 0xF) * 1000000 +
+                        (pt[4] & 0xF) * 100000 +
+                        (pt[5] & 0xF) * 10000 +
+                        (pt[6] & 0xF) * 1000 +
+                        (pt[7] & 0xF) * 100 +
+                        (pt[8] & 0xF) * 10 +
+                        (pt[9] & 0xF);
+                    return true;
             }
 
             number = 0;

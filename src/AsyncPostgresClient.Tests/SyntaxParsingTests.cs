@@ -234,11 +234,13 @@ namespace Lennox.AsyncPostgresClient.Tests
 
         [DataTestMethod]
         [DataRow("INSERT 0 5", 5)]
-        [DataRow("INSERT 0 5123", 5123)]
+        [DataRow("INSERT 0 5923", 5923)] // Be sure '9' is tested.
+        [DataRow("INSERT 0 5023", 5023)] // As well as '0'.
         [DataRow("INSERT 0 asd", null)]
         [DataRow(null, null)]
         [DataRow("", null)]
         [DataRow("invalid", null)]
+        [DataRow("invalid ", null)]
         [DataRow("5", null)]
         public void ParseNumericValueFromNonQueryResponseTests(
             string s, int? expected)

@@ -967,6 +967,8 @@ namespace Lennox.AsyncPostgresClient
                         AssertMessageValue.Positive(
                             nameof(row.Length), row.Length);
 
+                        // TODO: This is a bad allocation. When possible,
+                        // consider Span<byte> ?
                         row._data = ArrayPool<byte>.GetArray(row.Length);
                         row._pooledArray = true;
                         bb.CopyTo(row._data, 0, row.Length);

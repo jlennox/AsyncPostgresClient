@@ -211,7 +211,6 @@ namespace Lennox.AsyncPostgresClient.Tests
 
                     Assert.AreEqual(0, noResults.Length);
 
-
                     var nullResults = await ReadTempUsers(
                         connection, withWhere, new {
                             Name = (string)null
@@ -226,6 +225,107 @@ namespace Lennox.AsyncPostgresClient.Tests
 
                     Assert.AreEqual(0, escapeAttempts.Length);
                 }
+            }
+        }
+
+        [TestMethod]
+        public async Task ArrayParameterTest()
+        {
+            using (var connection = await PostgresServerInformation.Open())
+            using (var transaction = connection.BeginTransaction())
+            {
+                await CreateTempUsers(connection);
+
+                const string query = @"
+                    SELECT *
+                    FROM tempUser
+                    LEFT JOIN tempUserInfo IN (@Ids)
+                    WHERE tempUser.id IN (@Ids)";
+
+                var users = await ReadTempUsers(
+                    connection, query, new {
+                        Ids = new[] { 1, 2 }
+                    });
+
+                Assert.AreEqual(2, users.Length);
+
+                var guyOne = users.Single(t => t.Id == 0);
+                var guyTwo = users.Single(t => t.Id == 1);
+
+                Assert.AreEqual(3, guyOne.Infos.Count);
+                Assert.AreEqual(2, guyTwo.Infos.Count);
+            }
+        }
+
+        private struct TempArray
+        {
+            public int Id { get; set; }
+            public int[] Numbers { get; set; }
+            public string[][] Texts { get; set; }
+        }
+
+        [TestMethod]
+        public async Task ArrayReaderTest()
+        {
+            using (var connection = await PostgresServerInformation.Open())
+            using (var transaction = connection.BeginTransaction())
+            {
+                const string schema = @"
+                    CREATE TEMP TABLE tempArray (id int4, numbers integer[], texts text[][]);
+
+                    INSERT INTO tempArray
+                        VALUES (0,
+                        '{10000, 10000, 10000, 10000}',
+                        '{{""meeting"", ""lunch""}, {""training"", ""presentation""}}');
+
+                    INSERT INTO tempArray
+                        VALUES (1,
+                        '{10001, 10002, 10003, 10004}',
+                        '{{""meeting"", ""lunch""}, {""training"", ""presentation""}}');
+
+                    INSERT INTO tempArray
+                        VALUES (2,
+                        '{10001, 10002, 10003, 10004}',
+                        '{{""meeting"", ""lunch""}, {""training"", ""presentation""}}');
+
+                    INSERT INTO tempArray
+                        VALUES (3,
+                        '{}',
+                        '{{""meeting"", ""lunch""}, {null, null}}');
+
+                    INSERT INTO tempArray
+                        VALUES (4,
+                        null,
+                        null);";
+
+                await connection.ExecuteAsync(schema);
+
+                const string query = @"
+                    SELECT *
+                    FROM tempArray";
+
+                var data = (await connection
+                    .QueryAsync<TempArray>(query)).ToArray();
+
+                Assert.AreEqual(5, data.Length);
+
+                var guy0 = data.Single(t => t.Id == 0);
+                var guy1 = data.Single(t => t.Id == 1);
+                var guy2 = data.Single(t => t.Id == 2);
+                var guy3 = data.Single(t => t.Id == 3);
+                var guy4 = data.Single(t => t.Id == 4);
+
+                Assert.AreEqual(4, guy0.Numbers.Length);
+                CollectionAssert.AreEqual(new[] { 10000, 10000, 10000, 10000 }, guy0.Numbers);
+
+                Assert.AreEqual(4, guy1.Numbers.Length);
+                CollectionAssert.AreEqual(new[] { 10001, 10002, 10003, 10004 }, guy1.Numbers);
+
+                Assert.AreEqual(4, guy2.Numbers.Length);
+                CollectionAssert.AreEqual(new[] { 10001, 10002, 10003, 10004 }, guy2.Numbers);
+
+                Assert.AreEqual(0, guy3.Numbers.Length);
+                Assert.AreEqual(null, guy4.Numbers);
             }
         }
     }

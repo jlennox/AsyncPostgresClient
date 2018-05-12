@@ -1,14 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data;
-using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Text;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
-using Lennox.AsyncPostgresClient.BufferAccess;
-using Lennox.AsyncPostgresClient.Exceptions;
 
 namespace Lennox.AsyncPostgresClient.PostgresTypes
 {
@@ -18,13 +15,14 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
     internal class PostgresTypeCollection
     {
         // https://www.postgresql.org/docs/9.2/static/catalog-pg-type.html
-        private const string _query = "SELECT typname, typtype, oid FROM pg_type;";
+        private const string _query = "SELECT typname, typtype, oid, typarray FROM pg_type;";
 
         private enum ResultIndex
         {
             Typename = 0,
             Type = 1,
-            Oid = 2
+            Oid = 2,
+            ArrayType = 3
         }
 
         public PostgresType[] Types { get; }
@@ -35,9 +33,13 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
         {
             Types = types.ToArray();
 
+            var arrayOids = new HashSet<int>(Types.Select(t => t.ArrayOid));
+
             _oidCodecLookup = types.ToDictionary(
                 t => t.Oid,
-                t => PostgresTypeConverter.ConverterByName(t.Name));
+                t => PostgresTypeConverter.ConverterByName(
+                    t.Name,
+                    arrayOids.Contains(t.Oid)));
         }
 
         internal static async ValueTask<PostgresTypeCollection> Create(
@@ -65,7 +67,8 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
                         queryResults.Add(new PostgresType {
                             Name = reader.GetString((int)ResultIndex.Typename),
                             //Type = reader.GetByte((int)ResultIndex.Type),
-                            Oid = reader.GetInt32((int)ResultIndex.Oid)
+                            Oid = reader.GetInt32((int)ResultIndex.Oid),
+                            ArrayOid = reader.GetInt32((int)ResultIndex.ArrayType)
                         });
                     }
 
@@ -103,7 +106,7 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
             if (codec == null)
             {
                 throw new NotImplementedException(
-                    $"Convertion of type '{typeConverter.Name}' is not supported.");
+                    $"Convertion of type '{typeConverter.Name}' ({oid}) is not supported.");
             }
 
             switch (formatCode)
@@ -133,6 +136,7 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
 
         public byte Type { get; set; }
         public int Oid { get; set; }
+        public int ArrayOid { get; set; }
 
         private string _name;
         private int _nameHashCode;
@@ -176,11 +180,9 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
 
     internal struct PostgresTypeConverter
     {
-        public delegate object ConvertDelegate(
-            DataRow row, PostgresClientState state);
-
         public string Name { get; set; }
         public IPostgresTypeCodec Codec { get; set; }
+        public bool IsArray { get; set; }
 
         private static readonly Dictionary<int, IPostgresTypeCodec> _codecLookup;
 
@@ -221,7 +223,7 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
         }
 
         public static PostgresTypeConverter ConverterByName(
-            string postgresTypeName)
+            string postgresTypeName, bool isArray)
         {
             var typeHash = postgresTypeName.GetHashCode();
 
@@ -229,7 +231,8 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
 
             return new PostgresTypeConverter {
                 Name = postgresTypeName,
-                Codec = codec
+                Codec = codec,
+                IsArray = isArray
             };
         }
 
@@ -256,6 +259,7 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
                     t => t.Type);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static void DemandDataLength(DataRow row, int length)
         {
             if (row.Data.Length < length || row.Length != length)

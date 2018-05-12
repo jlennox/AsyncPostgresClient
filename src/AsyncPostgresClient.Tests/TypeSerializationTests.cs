@@ -218,5 +218,32 @@ namespace Lennox.AsyncPostgresClient.Tests
             }
         }
 
+        [DataTestMethod]
+        [DataRow(false, DisplayName = "Text results")]
+        [DataRow(true, DisplayName = "Binary results")]
+        public async Task BasicIntArrayTypes(bool useBinary)
+        {
+            var cancel = CancellationToken.None;
+
+            using (var connection = await PostgresServerInformation.Open())
+            using (var command = new PostgresCommand(
+                "select '{10000, 10000, 10000, 10000}'::integer[]", connection))
+            {
+                connection.QueryResultFormat = useBinary
+                    ? PostgresFormatCode.Binary
+                    : PostgresFormatCode.Text;
+
+                var reader = await command.ExecuteReaderAsync(cancel);
+                Assert.IsTrue(await reader.ReadAsync(cancel));
+
+                var guid = (Guid)reader[0];
+
+                Assert.AreEqual(
+                    Guid.Parse("AC426679-CD6A-4571-A519-C4DD7691C63C"),
+                    guid);
+
+                Assert.IsFalse(await reader.ReadAsync(cancel));
+            }
+        }
     }
 }

@@ -5,6 +5,7 @@ using System.Data.Common;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
+using Lennox.AsyncPostgresClient.BufferAccess;
 using Lennox.AsyncPostgresClient.Exceptions;
 using Lennox.AsyncPostgresClient.Extension;
 using Lennox.AsyncPostgresClient.PostgresTypes;
@@ -219,10 +220,11 @@ namespace Lennox.AsyncPostgresClient
                 completeMessage.Tag) ?? 0;
         }
 
-        internal static int? ParseNumericValueFromNonQueryResponse(string s)
+        internal static unsafe int? ParseNumericValueFromNonQueryResponse(
+            string s)
         {
-            // TODO: Fix the allocations here.
             // Example: INSERT 0 5
+            //                   ^- this guy
 
             if (string.IsNullOrEmpty(s))
             {
@@ -231,14 +233,38 @@ namespace Lennox.AsyncPostgresClient
 
             var lastSpace = s.LastIndexOf(' ');
 
-            if (lastSpace == -1)
+            if (lastSpace == -1 || lastSpace == s.Length - 1)
             {
                 return null;
             }
 
-            var lastWord = s.Substring(lastSpace);
+            var length = s.Length - lastSpace - 1;
 
-            return int.TryParse(lastWord, out var val) ? val : (int?)null;
+            // int.MaxValue.ToString().Length
+            const int intMaxValueLength = 10;
+
+            if (length > intMaxValueLength)
+            {
+                return null;
+            }
+
+            var buffer = stackalloc byte[length];
+
+            for (var i = 0; i < length; ++i)
+            {
+                var chr = s[lastSpace + 1 + i];
+
+                if (chr < '0' || chr > '9')
+                {
+                    return null;
+                }
+
+                buffer[i] = (byte)chr;
+            }
+
+            return NumericBuffer.TryAsciiToInt(buffer, length, out var num)
+                ? num
+                : (int?)null;
         }
 
         internal async ValueTask<bool> ExecuteUntilFinished(
