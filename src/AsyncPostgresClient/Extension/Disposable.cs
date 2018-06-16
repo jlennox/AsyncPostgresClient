@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Runtime.CompilerServices;
 using System.Threading;
+using Lennox.AsyncPostgresClient.ExceptionLogger;
 
 namespace Lennox.AsyncPostgresClient.Extension
 {
@@ -7,8 +9,12 @@ namespace Lennox.AsyncPostgresClient.Extension
     {
         // Dispose() calls can throw exceptions. When disposing of multiple
         // objects this can cause a determinancy issue. TryDispose and its
-        // counterparts are designed to workaround this issue.
-        public static bool TryDispose<T>(this T disposable)
+        // counterparts are designed to workaround that.
+        public static bool TryDispose<T>(
+            this T disposable,
+            [CallerFilePath]string callerPath = null,
+            [CallerLineNumber]int callerLine = 0,
+            [CallerMemberName]string callerMember = null)
             where T : IDisposable
         {
             if (disposable == null)
@@ -21,14 +27,19 @@ namespace Lennox.AsyncPostgresClient.Extension
                 disposable.Dispose();
                 return true;
             }
-            catch
+            catch (Exception e)
             {
+                ExceptionLogging.Default.Log(
+                    e, callerPath, callerLine, callerMember);
                 return false;
             }
         }
 
         public static bool TryCancelDispose(
-            this CancellationTokenSource cts)
+            this CancellationTokenSource cts,
+            [CallerFilePath]string callerPath = null,
+            [CallerLineNumber]int callerLine = 0,
+            [CallerMemberName]string callerMember = null)
         {
             if (cts == null)
             {
@@ -39,8 +50,10 @@ namespace Lennox.AsyncPostgresClient.Extension
             {
                 cts.Cancel(false);
             }
-            catch
+            catch (Exception e)
             {
+                ExceptionLogging.Default.Log(
+                    e, callerPath, callerLine, callerMember);
             }
 
             return TryDispose(cts);
