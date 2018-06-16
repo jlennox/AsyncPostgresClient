@@ -31,7 +31,7 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
     {
         public Type SystemType { get; set; } = typeof(T);
 
-        public abstract IReadOnlyCollection<T> DecodeBinaryArray(
+        public abstract IReadOnlyList<T> DecodeBinaryArray(
             DataRow row, PostgresClientState state);
         public abstract T DecodeBinary(DataRow row, PostgresClientState state);
         public abstract T DecodeText(DataRow row, PostgresClientState state);
@@ -81,7 +81,7 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
     {
         public static readonly PostgresBoolCodec Default = new PostgresBoolCodec();
 
-        public override unsafe IReadOnlyCollection<bool> DecodeBinaryArray(
+        public override unsafe IReadOnlyList<bool> DecodeBinaryArray(
             DataRow row, PostgresClientState state)
         {
             if (row.Length == 0)
@@ -153,7 +153,7 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
     {
         public static readonly PostgresStringCodec Default = new PostgresStringCodec();
 
-        public override unsafe IReadOnlyCollection<string> DecodeBinaryArray(
+        public override unsafe IReadOnlyList<string> DecodeBinaryArray(
             DataRow row, PostgresClientState state)
         {
             if (row.Data.Length == 0)
@@ -164,7 +164,7 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
             var results = new List<string>();
 
             fixed (byte* dataPtr = row.Data)
-            for (var i = 0; i < row.Data.Length;)
+            for (var i = 0; i < row.Length;)
             {
                 var size = BinaryBuffer.ReadIntNetworkUnsafe(&dataPtr[i]);
 
@@ -182,7 +182,7 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
 
         public override string DecodeBinary(DataRow row, PostgresClientState state)
         {
-            if (row.Data.Length == 0)
+            if (row.Length == 0)
             {
                 return "";
             }
@@ -213,7 +213,7 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
     {
         public static readonly PostgresShortCodec Default = new PostgresShortCodec();
 
-        public override unsafe IReadOnlyCollection<short> DecodeBinaryArray(
+        public override unsafe IReadOnlyList<short> DecodeBinaryArray(
             DataRow row, PostgresClientState state)
         {
             const int length = 2;
@@ -269,7 +269,7 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
     {
         public static readonly PostgresIntCodec Default = new PostgresIntCodec();
 
-        public override unsafe IReadOnlyCollection<int> DecodeBinaryArray(
+        public override unsafe IReadOnlyList<int> DecodeBinaryArray(
             DataRow row, PostgresClientState state)
         {
             const int length = 4;
@@ -325,7 +325,7 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
     {
         public static readonly PostgresLongCodec Default = new PostgresLongCodec();
 
-        public override unsafe IReadOnlyCollection<long> DecodeBinaryArray(
+        public override unsafe IReadOnlyList<long> DecodeBinaryArray(
             DataRow row, PostgresClientState state)
         {
             const int length = 8;
@@ -381,7 +381,7 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
     {
         public static readonly PostgresGuidCodec Default = new PostgresGuidCodec();
 
-        public override unsafe IReadOnlyCollection<Guid> DecodeBinaryArray(
+        public override unsafe IReadOnlyList<Guid> DecodeBinaryArray(
             DataRow row, PostgresClientState state)
         {
             const int length = 16;
@@ -453,7 +453,7 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
     {
         public static readonly PostgresDateTimeCodec Default = new PostgresDateTimeCodec();
 
-        public override IReadOnlyCollection<DateTime> DecodeBinaryArray(
+        public override IReadOnlyList<DateTime> DecodeBinaryArray(
             DataRow row, PostgresClientState state)
         {
             throw new NotImplementedException();
@@ -489,7 +489,7 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
     {
         public static readonly PostgresTimeSpanCodec Default = new PostgresTimeSpanCodec();
 
-        public override IReadOnlyCollection<DateTime> DecodeBinaryArray(
+        public override IReadOnlyList<DateTime> DecodeBinaryArray(
             DataRow row, PostgresClientState state)
         {
             throw new NotImplementedException();
@@ -523,7 +523,7 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
     {
         public static readonly PostgresDecimalCodec Default = new PostgresDecimalCodec();
 
-        public override IReadOnlyCollection<decimal> DecodeBinaryArray(
+        public override IReadOnlyList<decimal> DecodeBinaryArray(
             DataRow row, PostgresClientState state)
         {
             throw new NotImplementedException();
@@ -558,7 +558,7 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
     {
         public static readonly PostgresFloatCodec Default = new PostgresFloatCodec();
 
-        public override IReadOnlyCollection<float> DecodeBinaryArray(
+        public override IReadOnlyList<float> DecodeBinaryArray(
             DataRow row, PostgresClientState state)
         {
             throw new NotImplementedException();
@@ -596,7 +596,7 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
     {
         public static readonly PostgresDoubleCodec Default = new PostgresDoubleCodec();
 
-        public override IReadOnlyCollection<double> DecodeBinaryArray(
+        public override IReadOnlyList<double> DecodeBinaryArray(
             DataRow row, PostgresClientState state)
         {
             throw new NotImplementedException();
