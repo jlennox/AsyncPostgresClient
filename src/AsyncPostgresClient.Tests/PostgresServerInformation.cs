@@ -11,7 +11,7 @@ namespace Lennox.AsyncPostgresClient.Tests
 
         // Static. Used for testing non-live requests.
         public static string FakeConnectionString =>
-            "Server=server;User ID=Test_User;Password=56ffc8c3cd680bf96ba600943f149b92;Database=test_db";
+            "Server=server;User ID=Test_User;Password=test_password;Database=test_db";
 
         public static Task<PostgresDbConnection> Open()
         {

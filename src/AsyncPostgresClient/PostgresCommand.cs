@@ -149,11 +149,13 @@ namespace Lennox.AsyncPostgresClient
             await _connection.Query(async, this, cancellationToken)
                 .ConfigureAwait(false);
 
-            var reader = new PostgresDbDataReader(
-                behavior, _connection, this, cancellationToken);
+            PostgresDbDataReader reader = null;
 
             try
             {
+                reader = new PostgresDbDataReader(
+                    behavior, _connection, this, cancellationToken);
+
                 await reader.ReadUntilData(async, cancellationToken)
                     .ConfigureAwait(false);
             }

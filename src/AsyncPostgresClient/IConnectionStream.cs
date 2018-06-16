@@ -1,5 +1,4 @@
 ﻿using System;
-using System.IO;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -12,17 +11,18 @@ namespace Lennox.AsyncPostgresClient
     {
         T CreateTcpStream(string hostname, int port);
 
-        int Receive(T stream, byte[] buffer, int offset, int count);
+        int Receive(in T stream, byte[] buffer, int offset, int count);
 
-        Task<int> ReceiveAsync(T stream, byte[] buffer, int offset, int count,
+        Task<int> ReceiveAsync(
+            in T stream, byte[] buffer, int offset, int count,
             CancellationToken cancellationToken);
 
-        void Send(T stream, byte[] buffer, int offset, int count);
+        void Send(in T stream, byte[] buffer, int offset, int count);
 
-        Task SendAsync(T stream, byte[] buffer, int offset, int count,
+        Task SendAsync(in T stream, byte[] buffer, int offset, int count,
             CancellationToken cancellationToken);
 
-        void Dispose(T stream);
+        void Dispose(in T stream);
     }
 
     internal static class ConnectionStreamEx
@@ -40,10 +40,10 @@ namespace Lennox.AsyncPostgresClient
                 return new ValueTask<int>(nread);
             }
 
-            var ReceiveTask = connectionStream.ReceiveAsync(
+            var receiveTask = connectionStream.ReceiveAsync(
                 stream, buffer, offset, count, cancellationToken);
 
-            return new ValueTask<int>(ReceiveTask);
+            return new ValueTask<int>(receiveTask);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -63,7 +63,7 @@ namespace Lennox.AsyncPostgresClient
         }
     }
 
-    public struct ClrClient : IDisposable
+    public readonly struct ClrClient : IDisposable
     {
         public TcpClient Client { get; }
         public Socket Socket { get; }
@@ -94,7 +94,7 @@ namespace Lennox.AsyncPostgresClient
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public int Receive(ClrClient stream,
+        public int Receive(in ClrClient stream,
             byte[] buffer, int offset, int count)
         {
             return stream.Socket
@@ -104,7 +104,7 @@ namespace Lennox.AsyncPostgresClient
         // TODO: Add cancellation support.
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Task<int> ReceiveAsync(
-            ClrClient stream, byte[] buffer, int offset, int count,
+            in ClrClient stream, byte[] buffer, int offset, int count,
             CancellationToken cancellationToken)
         {
             var segment = new ArraySegment<byte>(buffer, offset, count);
@@ -112,7 +112,8 @@ namespace Lennox.AsyncPostgresClient
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Send(ClrClient stream, byte[] buffer, int offset, int count)
+        public void Send(
+            in ClrClient stream, byte[] buffer, int offset, int count)
         {
             stream.Socket.Send(buffer, offset, count, SocketFlags.None);
         }
@@ -120,14 +121,14 @@ namespace Lennox.AsyncPostgresClient
         // TODO: Add cancellation support.
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Task SendAsync(
-            ClrClient stream, byte[] buffer, int offset,
+            in ClrClient stream, byte[] buffer, int offset,
             int count, CancellationToken cancellationToken)
         {
             var segment = new ArraySegment<byte>(buffer, offset, count);
             return stream.Socket.SendAsync(segment, SocketFlags.None);
         }
 
-        public void Dispose(ClrClient stream)
+        public void Dispose(in ClrClient stream)
         {
             stream.Dispose();
         }

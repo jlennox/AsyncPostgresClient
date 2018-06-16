@@ -159,11 +159,19 @@ namespace Lennox.AsyncPostgresClient
             string connectionString,
             bool asyncOnly)
         {
-            PostgresConnectionString = new PostgresConnectionString(
-                connectionString);
-            _buffer = PostgresDbConnection.GetBuffer();
-            _writeBuffer = MemoryStreamPool.Get();
-            AsyncOnly = asyncOnly;
+            try
+            {
+                PostgresConnectionString = new PostgresConnectionString(
+                    connectionString);
+                _buffer = PostgresDbConnection.GetBuffer();
+                _writeBuffer = MemoryStreamPool.Get();
+                AsyncOnly = asyncOnly;
+            }
+            catch
+            {
+                _cancel.TryDispose();
+                throw;
+            }
         }
 
         private void ResetBuffer()
@@ -659,7 +667,7 @@ namespace Lennox.AsyncPostgresClient
             }
         }
 
-        public void SendProperty(PostgresPropertySetting setting)
+        public void SendProperty(in PostgresPropertySetting setting)
         {
             // TODO: Make this API not allocate.
             SendProperties(false, new[] { setting }, 1, CancellationToken.None)
@@ -675,7 +683,7 @@ namespace Lennox.AsyncPostgresClient
         }
 
         public Task SendPropertyAsync(
-            PostgresPropertySetting setting,
+            in PostgresPropertySetting setting,
             CancellationToken cancellationToken)
         {
             // TODO: Make this API not allocate.
@@ -749,32 +757,29 @@ namespace Lennox.AsyncPostgresClient
             return new PostgresCommand("", this);
         }
 
-        private PostgresTypeCollection _typeCollection = null;
+        private Task<PostgresTypeCollection> _typeCollection = null;
 
-        internal async Task<PostgresTypeCollection> GetTypeCollection(
+        internal Task<PostgresTypeCollection> GetTypeCollection(
             bool async, CancellationToken cancellationToken)
         {
-            if (_typeCollection != null)
+            if (_typeCollection == null)
             {
-                return _typeCollection;
+                _typeCollection = PostgresTypeCollection
+                    .Create(async, this, cancellationToken);
             }
-
-            _typeCollection = await PostgresTypeCollection
-                .Create(async, this, cancellationToken)
-                .ConfigureAwait(false);
 
             return _typeCollection;
         }
 
         internal PostgresTypeCollection DemandTypeCollection()
         {
-            if (_typeCollection == null)
+            if (!_typeCollection.IsCompleted)
             {
                 throw new InvalidOperationException(
                     "Invalid execution sequence. Type collection is not yet initialized.");
             }
 
-            return _typeCollection;
+            return _typeCollection.Result;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

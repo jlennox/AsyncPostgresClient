@@ -1,7 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Lennox.AsyncPostgresClient.Tests
@@ -11,8 +9,9 @@ namespace Lennox.AsyncPostgresClient.Tests
     {
         private static string[] ParseString(string input)
         {
-            var command = new PostgresCommand();
-            command.CommandText = input;
+            var command = new PostgresCommand {
+                CommandText = input
+            };
 
             command.PostgresParameters.Add("foobar", "value");
             command.PostgresParameters.Add("baz", "value2");

@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Text;
 using Lennox.AsyncPostgresClient.Extension;
 using Lennox.AsyncPostgresClient.Pool;
 
@@ -78,7 +77,8 @@ namespace Lennox.AsyncPostgresClient
 
                         if (chrK == '$')
                         {
-                            var indexOf = sql.IndexOf("$$", k);
+                            var indexOf = sql.IndexOf("$$", k,
+                                StringComparison.Ordinal);
 
                             // Really... it's invalid syntax.
                             if (indexOf == -1)

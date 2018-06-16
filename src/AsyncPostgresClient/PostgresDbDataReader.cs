@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections;
-using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
 using System.Runtime.CompilerServices;
@@ -540,7 +539,7 @@ namespace Lennox.AsyncPostgresClient
             }
 
             var row = ignoreData
-                ? default(DataRow)
+                ? default
                 : _lastDataRowMessage.Value.Rows[ordinal];
 
             var column = _descriptionMessage.Value.Fields[ordinal];

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Text;
 using Lennox.AsyncPostgresClient.Diagnostic;
 
@@ -8,6 +9,7 @@ namespace Lennox.AsyncPostgresClient.BufferAccess
     // TODO: Look into https://johnnylee-sde.github.io/Fast-numeric-string-to-int/
     internal static class NumericBuffer
     {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static unsafe bool TryAsciiToInt(
             byte[] data, int offset, int length, out int number)
         {
@@ -106,6 +108,7 @@ namespace Lennox.AsyncPostgresClient.BufferAccess
             return false;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static short AsciiToShort(byte[] data)
         {
             if (TryAsciiToInt(data, 0, 2, out var number))
@@ -116,6 +119,7 @@ namespace Lennox.AsyncPostgresClient.BufferAccess
             throw new ArgumentOutOfRangeException();
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static short AsciiToShort(byte[] data, int length)
         {
             if (TryAsciiToInt(data, 0, length, out var number))
@@ -126,6 +130,7 @@ namespace Lennox.AsyncPostgresClient.BufferAccess
             throw new ArgumentOutOfRangeException();
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int AsciiToInt(byte[] data)
         {
             if (TryAsciiToInt(data, 0, data.Length, out var number))
@@ -136,6 +141,7 @@ namespace Lennox.AsyncPostgresClient.BufferAccess
             throw new ArgumentOutOfRangeException();
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int AsciiToInt(byte[] data, int offset, int length)
         {
             if (TryAsciiToInt(data, offset, length, out var number))
@@ -146,6 +152,7 @@ namespace Lennox.AsyncPostgresClient.BufferAccess
             throw new ArgumentOutOfRangeException();
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static long AsciiToLong(byte[] data)
         {
             return AsciiToLong(data, 0, data.Length);
@@ -178,6 +185,7 @@ namespace Lennox.AsyncPostgresClient.BufferAccess
             return sum;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static decimal AsciiToDecimal(byte[] data)
         {
             return AsciiToDecimal(data, data.Length);

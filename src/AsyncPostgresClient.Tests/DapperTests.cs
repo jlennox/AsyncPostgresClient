@@ -1,11 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Dapper;
-using Lennox.AsyncPostgresClient.Diagnostic;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Lennox.AsyncPostgresClient.Tests
@@ -180,7 +178,7 @@ namespace Lennox.AsyncPostgresClient.Tests
                     LEFT JOIN tempUserInfo ON (tempUserInfo.user_id = tempUser.id)";
 
                 {
-                    var withWhere = query + @"
+                    const string withWhere = query + @"
                         WHERE tempUser.id = @Id";
 
                     var users = await ReadTempUsers(
@@ -193,7 +191,7 @@ namespace Lennox.AsyncPostgresClient.Tests
                 }
 
                 {
-                    var withWhere = query + @"
+                    const string withWhere = query + @"
                         WHERE tempUser.name = @Name";
 
                     var users = await ReadTempUsers(
@@ -315,14 +313,15 @@ namespace Lennox.AsyncPostgresClient.Tests
                 var guy3 = data.Single(t => t.Id == 3);
                 var guy4 = data.Single(t => t.Id == 4);
 
-                Assert.AreEqual(4, guy0.Numbers.Length);
-                CollectionAssert.AreEqual(new[] { 10000, 10000, 10000, 10000 }, guy0.Numbers);
+                void AssertNumbers(TempArray guy, int[] expected)
+                {
+                    Assert.AreEqual(expected.Length, guy.Numbers.Length);
+                    CollectionAssert.AreEqual(expected, guy.Numbers);
+                }
 
-                Assert.AreEqual(4, guy1.Numbers.Length);
-                CollectionAssert.AreEqual(new[] { 10001, 10002, 10003, 10004 }, guy1.Numbers);
-
-                Assert.AreEqual(4, guy2.Numbers.Length);
-                CollectionAssert.AreEqual(new[] { 10001, 10002, 10003, 10004 }, guy2.Numbers);
+                AssertNumbers(guy0, new[] { 10000, 10000, 10000, 10000 });
+                AssertNumbers(guy1, new[] { 10001, 10002, 10003, 10004 });
+                AssertNumbers(guy2, new[] { 10001, 10002, 10003, 10004 });
 
                 Assert.AreEqual(0, guy3.Numbers.Length);
                 Assert.AreEqual(null, guy4.Numbers);

@@ -8,6 +8,8 @@ using System.Threading;
 using Lennox.AsyncPostgresClient.Extension;
 using Lennox.AsyncPostgresClient.Pool;
 
+#pragma warning disable EPS01 // A struct can be made readonly
+
 namespace Lennox.AsyncPostgresClient
 {
     // https://www.postgresql.org/docs/9.3/static/protocol-message-formats.html
@@ -1991,3 +1993,5 @@ namespace Lennox.AsyncPostgresClient
         }
     }
 }
+
+#pragma warning restore EPS01 // A struct can be made readonly

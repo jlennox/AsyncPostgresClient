@@ -27,7 +27,7 @@ namespace Lennox.AsyncPostgresClient.Extension
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void AssertCompleted<T>(this ValueTask<T> valueTask)
+        public static void AssertCompleted<T>(this in ValueTask<T> valueTask)
         {
             if (!valueTask.IsCompleted)
             {
@@ -45,7 +45,7 @@ namespace Lennox.AsyncPostgresClient.Extension
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static T CompletedTaskValue<T>(this ValueTask<T> valueTask)
+        public static T CompletedTaskValue<T>(this in ValueTask<T> valueTask)
         {
             AssertCompleted(valueTask);
 

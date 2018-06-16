@@ -1,13 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Lennox.AsyncPostgresClient.Pool;
 
 namespace Lennox.AsyncPostgresClient
 {
-    public struct PostgresPropertySetting
+    public readonly struct PostgresPropertySetting
     {
         public string Name { get; }
         public string Value { get; }

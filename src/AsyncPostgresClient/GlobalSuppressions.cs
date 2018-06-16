@@ -1,0 +1,4 @@
+﻿using System.Diagnostics.CodeAnalysis;
+
+[assembly: System.Diagnostics.CodeAnalysis.SuppressMessage("AsyncUsage.CSharp.Naming", "UseAsyncSuffix:Use Async suffix", Justification = "<Pending>", Scope = "member", Target = "~M:Lennox.AsyncPostgresClient.PostgresDbConnectionBase.GetTypeCollection(System.Boolean,System.Threading.CancellationToken)~System.Threading.Tasks.Task{Lennox.AsyncPostgresClient.PostgresTypes.PostgresTypeCollection}")]
+[assembly: System.Diagnostics.CodeAnalysis.SuppressMessage("AsyncUsage.CSharp.Naming", "UseAsyncSuffix:Use Async suffix", Justification = "<Pending>", Scope = "member", Target = "~M:Lennox.AsyncPostgresClient.PostgresDbConnectionBase.QueryCore(System.Boolean,System.Collections.Generic.IReadOnlyList{System.String},Lennox.AsyncPostgresClient.PostgresCommand,System.Threading.CancellationToken)~System.Threading.Tasks.Task")]

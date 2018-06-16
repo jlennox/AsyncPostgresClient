@@ -42,7 +42,7 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
                     arrayOids.Contains(t.Oid)));
         }
 
-        internal static async ValueTask<PostgresTypeCollection> Create(
+        internal static async Task<PostgresTypeCollection> Create(
             bool async,
             PostgresDbConnectionBase connection,
             CancellationToken cancel)
