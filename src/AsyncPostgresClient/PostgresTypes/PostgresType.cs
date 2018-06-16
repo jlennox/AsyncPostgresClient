@@ -35,11 +35,34 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
 
             var arrayOids = new HashSet<int>(Types.Select(t => t.ArrayOid));
 
-            _oidCodecLookup = types.ToDictionary(
-                t => t.Oid,
-                t => PostgresTypeConverter.ConverterByName(
-                    t.Name,
-                    arrayOids.Contains(t.Oid)));
+            _oidCodecLookup = new Dictionary<int, PostgresTypeConverter>(
+                types.Count * 2);
+
+            // Process entries with array values first, so that when the array
+            // values themselves come up later they're skipped.
+            foreach (var type in types.OrderByDescending(t => t.ArrayOid > 0))
+            {
+                if (_oidCodecLookup.ContainsKey(type.Oid))
+                {
+                    continue;
+                }
+
+                var converter = PostgresTypeConverter
+                    .ConverterByName(
+                        type.Name,
+                        arrayOids.Contains(type.Oid));
+
+                _oidCodecLookup[type.Oid] = converter;
+
+                if (type.ArrayOid > 0 && converter.Codec != null)
+                {
+                    var arrayDecoder = converter.Codec.CreateArrayDecoder();
+                    var arrayConverter = new PostgresTypeConverter(
+                        type.Name, arrayDecoder, true);
+
+                    _oidCodecLookup[type.ArrayOid] = arrayConverter;
+                }
+            }
         }
 
         internal static async Task<PostgresTypeCollection> Create(
@@ -180,15 +203,25 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
 
     internal struct PostgresTypeConverter
     {
-        public string Name { get; set; }
-        public IPostgresTypeCodec Codec { get; set; }
-        public bool IsArray { get; set; }
+        public string Name { get; }
+        public IPostgresTypeCodec Codec { get; }
+        public bool IsArray { get; }
 
         private static readonly Dictionary<int, IPostgresTypeCodec> _codecLookup;
 
         static PostgresTypeConverter()
         {
             _codecLookup = CreateLookup();
+        }
+
+        public PostgresTypeConverter(
+            string name,
+            IPostgresTypeCodec codec,
+            bool isArray)
+        {
+            Name = name;
+            Codec = codec;
+            IsArray = isArray;
         }
 
         public static object Convert(
@@ -229,11 +262,7 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
 
             _codecLookup.TryGetValue(typeHash, out var codec);
 
-            return new PostgresTypeConverter {
-                Name = postgresTypeName,
-                Codec = codec,
-                IsArray = isArray
-            };
+            return new PostgresTypeConverter(postgresTypeName, codec, isArray);
         }
 
         private static Dictionary<int, IPostgresTypeCodec> CreateLookup()

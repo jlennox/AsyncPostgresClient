@@ -6,7 +6,6 @@ using Lennox.AsyncPostgresClient.BufferAccess;
 
 namespace Lennox.AsyncPostgresClient.PostgresTypes
 {
-
     [AttributeUsage(AttributeTargets.Class)]
     internal class PostgresTypeConverterMethodAttribute : Attribute
     {
@@ -25,14 +24,15 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
 
         object DecodeBinaryObject(DataRow row, PostgresClientState state);
         object DecodeTextObject(DataRow row, PostgresClientState state);
+        IPostgresTypeCodec CreateArrayDecoder();
     }
 
     internal abstract class PostgresTypeCodec<T> : IPostgresTypeCodec
     {
         public Type SystemType { get; set; } = typeof(T);
 
-        public abstract IReadOnlyList<T> DecodeBinaryArray(
-            DataRow row, PostgresClientState state);
+        public abstract unsafe IReadOnlyList<T> DecodeBinaryArray(
+            byte* data, int length, int count, PostgresClientState state);
         public abstract T DecodeBinary(DataRow row, PostgresClientState state);
         public abstract T DecodeText(DataRow row, PostgresClientState state);
         public abstract void EncodeBinary(MemoryStream ms, T value, PostgresClientState state);
@@ -50,6 +50,11 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
             PostgresClientState state)
         {
             return DecodeText(row, state);
+        }
+
+        public IPostgresTypeCodec CreateArrayDecoder()
+        {
+            return new PostgresArrayTypeWrapper<T>(this);
         }
 
         public T Decode(
@@ -76,27 +81,159 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
         }
     }
 
+    internal class PostgresArrayTypeWrapper<T>
+        : PostgresTypeCodec<IReadOnlyList<T>>
+    {
+        private readonly PostgresTypeCodec<T> _wrappedCodec;
+
+        public PostgresArrayTypeWrapper(PostgresTypeCodec<T> wrappedCodec)
+        {
+            _wrappedCodec = wrappedCodec;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public override unsafe IReadOnlyList<IReadOnlyList<T>> DecodeBinaryArray(
+            byte* data, int length, int count, PostgresClientState state)
+        {
+            throw new NotSupportedException();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public override unsafe IReadOnlyList<T> DecodeBinary(
+            DataRow row, PostgresClientState state)
+        {
+            // TODO
+            if (row.Length < 4 * 0)
+            {
+                // TODO
+                throw new Exception();
+            }
+
+            // https://stackoverflow.com/questions/4016412/postgresqls-libpq-encoding-for-binary-transport-of-array-data
+
+            fixed (byte* dataPtrBase = row.Data)
+            {
+                var dimentions = BinaryBuffer
+                    .ReadIntNetworkUnsafe(dataPtrBase);
+                var noNullBitmap = BinaryBuffer
+                    .ReadIntNetworkUnsafe(&dataPtrBase[4 * 1]);
+                var oid = BinaryBuffer
+                    .ReadIntNetworkUnsafe(&dataPtrBase[4 * 2]);
+
+                if (dimentions < 1)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(dimentions), dimentions,
+                        "Invalid dimention count.");
+                }
+
+                if (oid < 1)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(oid), oid,
+                        "Invalid oid.");
+                }
+
+                var hasDimentions = dimentions > 1;
+
+                if (hasDimentions)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(dimentions), dimentions,
+                        "Multi-dimentional arrays are not supported.");
+                }
+
+                var dimentionalArray = hasDimentions
+                    ? new List<IReadOnlyList<T>>(dimentions)
+                    : null;
+
+                var dataPtr = &dataPtrBase[4 * 3];
+
+                for (var dimention = 0; dimention < dimentions; ++dimention)
+                {
+                    var elementCount = BinaryBuffer
+                        .ReadIntNetworkUnsafe(dataPtr);
+                    dataPtr = &dataPtr[4];
+
+                    // TODO:
+                    var firstIndex = BinaryBuffer
+                        .ReadIntNetworkUnsafe(dataPtr);
+                    dataPtr = &dataPtr[4];
+
+                    IReadOnlyList<T> array;
+
+                    if (elementCount == 0)
+                    {
+                        array = EmptyArray<T>.Value;
+                    }
+                    else
+                    {
+
+                        var length = row.Data.Length - (dataPtr - dataPtrBase);
+                        array = _wrappedCodec.DecodeBinaryArray(
+                            dataPtr, (int)length, elementCount, state);
+                    }
+
+                    if (!hasDimentions)
+                    {
+                        return array;
+                    }
+
+                    dimentionalArray.Add(array);
+                }
+
+                throw new ArgumentOutOfRangeException(
+                    nameof(dimentions), dimentions,
+                    "Multi-dimentional arrays are not supported.");
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public override IReadOnlyList<T> DecodeText(
+            DataRow row, PostgresClientState state)
+        {
+            throw new NotSupportedException();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public override void EncodeBinary(
+            MemoryStream ms, IReadOnlyList<T> value,
+            PostgresClientState state)
+        {
+            throw new NotSupportedException();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public override void EncodeText(
+            MemoryStream ms, IReadOnlyList<T> value,
+            PostgresClientState state)
+        {
+            throw new NotSupportedException();
+        }
+    }
+
     [PostgresTypeConverterMethod(PostgresTypeNames.Bool)]
     internal class PostgresBoolCodec : PostgresTypeCodec<bool>
     {
         public static readonly PostgresBoolCodec Default = new PostgresBoolCodec();
 
         public override unsafe IReadOnlyList<bool> DecodeBinaryArray(
-            DataRow row, PostgresClientState state)
+            byte* data, int length, int count, PostgresClientState state)
         {
-            if (row.Length == 0)
+            if (length < count)
             {
-                return EmptyArray<bool>.Value;
+                throw new ArgumentOutOfRangeException(
+                    nameof(count), count,
+                    $"Element count is outside the data bounds of {length}");
             }
 
-            var result = new bool[row.Length];
+            var result = new bool[count];
 
             fixed (bool* resultPtr = result)
-            fixed (byte* dataPtr = row.Data)
             {
-                for (var i = 0; i < row.Length; ++i)
+                for (var i = 0; i < count; ++i)
                 {
-                    switch (dataPtr[i])
+                    switch (data[i])
                     {
                         case 0: resultPtr[i] = false; break;
                         case 1: resultPtr[i] = true; break;
@@ -154,27 +291,41 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
         public static readonly PostgresStringCodec Default = new PostgresStringCodec();
 
         public override unsafe IReadOnlyList<string> DecodeBinaryArray(
-            DataRow row, PostgresClientState state)
+            byte* data, int length, int count, PostgresClientState state)
         {
-            if (row.Data.Length == 0)
+            var results = new string[count];
+            var resultIndex = 0;
+
+            for (var i = 0; i < length;)
             {
-                return EmptyArray<string>.Value;
-            }
+                var size = BinaryBuffer.ReadIntNetworkUnsafe(&data[i]);
 
-            var results = new List<string>();
-
-            fixed (byte* dataPtr = row.Data)
-            for (var i = 0; i < row.Length;)
-            {
-                var size = BinaryBuffer.ReadIntNetworkUnsafe(&dataPtr[i]);
-
-                if (size + i > row.Length)
+                if (size + i > length)
                 {
                     throw new ArgumentOutOfRangeException();
                 }
 
-                var s = state.ServerEncoding.GetString(&dataPtr[i + 4], size);
-                results.Add(s);
+                i += 4;
+
+                var s = size == 0
+                    ? ""
+                    : state.ServerEncoding.GetString(&data[i], size);
+                results[resultIndex] = s;
+                ++resultIndex;
+
+                if (resultIndex == count)
+                {
+                    break;
+                }
+
+                i += size;
+            }
+
+            if (resultIndex != count)
+            {
+                // TODO
+                throw new Exception(
+                    "Unexpected early termination of string array.");
             }
 
             return results;
@@ -214,25 +365,19 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
         public static readonly PostgresShortCodec Default = new PostgresShortCodec();
 
         public override unsafe IReadOnlyList<short> DecodeBinaryArray(
-            DataRow row, PostgresClientState state)
+            byte* data, int length, int count, PostgresClientState state)
         {
-            const int length = 2;
+            const int dataLength = 2;
 
-            if (row.Length == 0)
-            {
-                return EmptyArray<short>.Value;
-            }
-
-            var result = new short[row.Length / length];
+            var result = new short[count];
             var resultIndex = 0;
 
             fixed (short* resultPtr = result)
-            fixed (byte* dataPtr = row.Data)
             {
-                for (var i = 0; i < row.Length; i += length)
+                for (var i = 0; i < length; i += dataLength)
                 {
                     resultPtr[resultIndex++] = BinaryBuffer
-                        .ReadShortNetworkUnsafe(&dataPtr[i]);
+                        .ReadShortNetworkUnsafe(&data[i]);
                 }
             }
 
@@ -270,25 +415,19 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
         public static readonly PostgresIntCodec Default = new PostgresIntCodec();
 
         public override unsafe IReadOnlyList<int> DecodeBinaryArray(
-            DataRow row, PostgresClientState state)
+            byte* data, int length, int count, PostgresClientState state)
         {
-            const int length = 4;
+            const int dataLength = 4;
 
-            if (row.Length == 0)
-            {
-                return EmptyArray<int>.Value;
-            }
-
-            var result = new int[row.Length / length];
+            var result = new int[count];
             var resultIndex = 0;
 
             fixed (int* resultPtr = result)
-            fixed (byte* dataPtr = row.Data)
             {
-                for (var i = 0; i < row.Length; i += length)
+                for (var i = 0; i < length; i += dataLength)
                 {
                     resultPtr[resultIndex++] = BinaryBuffer
-                        .ReadIntNetworkUnsafe(&dataPtr[i]);
+                        .ReadShortNetworkUnsafe(&data[i]);
                 }
             }
 
@@ -326,25 +465,19 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
         public static readonly PostgresLongCodec Default = new PostgresLongCodec();
 
         public override unsafe IReadOnlyList<long> DecodeBinaryArray(
-            DataRow row, PostgresClientState state)
+            byte* data, int length, int count, PostgresClientState state)
         {
-            const int length = 8;
+            const int dataLength = 8;
 
-            if (row.Length == 0)
-            {
-                return EmptyArray<long>.Value;
-            }
-
-            var result = new long[row.Length / length];
+            var result = new long[count];
             var resultIndex = 0;
 
             fixed (long* resultPtr = result)
-            fixed (byte* dataPtr = row.Data)
             {
-                for (var i = 0; i < row.Length; i += length)
+                for (var i = 0; i < length; i += dataLength)
                 {
                     resultPtr[resultIndex++] = BinaryBuffer
-                        .ReadLongNetworkUnsafe(&dataPtr[i]);
+                        .ReadShortNetworkUnsafe(&data[i]);
                 }
             }
 
@@ -382,24 +515,18 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
         public static readonly PostgresGuidCodec Default = new PostgresGuidCodec();
 
         public override unsafe IReadOnlyList<Guid> DecodeBinaryArray(
-            DataRow row, PostgresClientState state)
+            byte* data, int length, int count, PostgresClientState state)
         {
-            const int length = 16;
+            const int dataLength = 16;
 
-            if (row.Length == 0)
-            {
-                return EmptyArray<Guid>.Value;
-            }
-
-            var result = new Guid[row.Length / length];
+            var result = new Guid[count];
             var resultIndex = 0;
 
             fixed (Guid* resultPtr = result)
-            fixed (byte* dataPtr = row.Data)
             {
-                for (var i = 0; i < row.Length; i += length)
+                for (var i = 0; i < length; i += dataLength)
                 {
-                    resultPtr[resultIndex++] = ReadBinaryGuid(&dataPtr[i]);
+                    resultPtr[resultIndex++] = ReadBinaryGuid(&data[i]);
                 }
             }
 
@@ -453,8 +580,8 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
     {
         public static readonly PostgresDateTimeCodec Default = new PostgresDateTimeCodec();
 
-        public override IReadOnlyList<DateTime> DecodeBinaryArray(
-            DataRow row, PostgresClientState state)
+        public override unsafe IReadOnlyList<DateTime> DecodeBinaryArray(
+            byte* data, int length, int count, PostgresClientState state)
         {
             throw new NotImplementedException();
         }
@@ -489,8 +616,8 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
     {
         public static readonly PostgresTimeSpanCodec Default = new PostgresTimeSpanCodec();
 
-        public override IReadOnlyList<DateTime> DecodeBinaryArray(
-            DataRow row, PostgresClientState state)
+        public override unsafe IReadOnlyList<DateTime> DecodeBinaryArray(
+            byte* data, int length, int count, PostgresClientState state)
         {
             throw new NotImplementedException();
         }
@@ -523,8 +650,8 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
     {
         public static readonly PostgresDecimalCodec Default = new PostgresDecimalCodec();
 
-        public override IReadOnlyList<decimal> DecodeBinaryArray(
-            DataRow row, PostgresClientState state)
+        public override unsafe IReadOnlyList<decimal> DecodeBinaryArray(
+            byte* data, int length, int count, PostgresClientState state)
         {
             throw new NotImplementedException();
         }
@@ -558,8 +685,8 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
     {
         public static readonly PostgresFloatCodec Default = new PostgresFloatCodec();
 
-        public override IReadOnlyList<float> DecodeBinaryArray(
-            DataRow row, PostgresClientState state)
+        public override unsafe IReadOnlyList<float> DecodeBinaryArray(
+            byte* data, int length, int count, PostgresClientState state)
         {
             throw new NotImplementedException();
         }
@@ -596,8 +723,8 @@ namespace Lennox.AsyncPostgresClient.PostgresTypes
     {
         public static readonly PostgresDoubleCodec Default = new PostgresDoubleCodec();
 
-        public override IReadOnlyList<double> DecodeBinaryArray(
-            DataRow row, PostgresClientState state)
+        public override unsafe IReadOnlyList<double> DecodeBinaryArray(
+            byte* data, int length, int count, PostgresClientState state)
         {
             throw new NotImplementedException();
         }

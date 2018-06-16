@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading;
@@ -269,32 +269,33 @@ namespace Lennox.AsyncPostgresClient.Tests
             using (var transaction = connection.BeginTransaction())
             {
                 const string schema = @"
-                    CREATE TEMP TABLE tempArray (id int4, numbers integer[], texts text[][]);
+                    CREATE TEMP TABLE tempArray (id int4, numbers integer[], texts text[][], texts3 text[][][]);
 
                     INSERT INTO tempArray
                         VALUES (0,
                         '{10000, 10000, 10000, 10000}',
-                        '{{""meeting"", ""lunch""}, {""training"", ""presentation""}}');
+                        '{{""meeting"", ""lunch""}, {""training"", ""presentation""}}',
+                        '{{""meeting"", ""lunch"", null}, {""training"", ""presentation"", null}, {""training2"", ""presentation2"", null}}');
 
                     INSERT INTO tempArray
                         VALUES (1,
                         '{10001, 10002, 10003, 10004}',
-                        '{{""meeting"", ""lunch""}, {""training"", ""presentation""}}');
+                        '{{""meeting"", ""lunch""}, {""training"", ""presentation""}}', null);
 
                     INSERT INTO tempArray
                         VALUES (2,
                         '{10001, 10002, 10003, 10004}',
-                        '{{""meeting"", ""lunch""}, {""training"", ""presentation""}}');
+                        '{{""meeting"", ""lunch""}, {""training"", ""presentation""}}', null);
 
                     INSERT INTO tempArray
                         VALUES (3,
                         '{}',
-                        '{{""meeting"", ""lunch""}, {null, null}}');
+                        '{{""meeting"", ""lunch""}, {null, null}}', null);
 
                     INSERT INTO tempArray
                         VALUES (4,
                         null,
-                        null);";
+                        null, null);";
 
                 await connection.ExecuteAsync(schema);
 
