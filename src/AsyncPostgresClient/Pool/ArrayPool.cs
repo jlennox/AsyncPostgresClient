@@ -1,14 +1,14 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
+using Microsoft.IO;
 
 namespace Lennox.AsyncPostgresClient.Pool
 {
-    // NOTE: All pooling code is placeholders that will be later reworked.
+    // NOTE: A lot of pooling code is placeholders that will be later reworked.
 
-    // https://github.com/dotnet/coreclr/tree/master/src/mscorlib/shared/System/Buffers
     internal static class ArrayPool
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -24,9 +24,32 @@ namespace Lennox.AsyncPostgresClient.Pool
         void Free(ref T[] array);
     }
 
+    internal class SystemBufferArrayPool<T> : IArrayPool<T>
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public T[] Get(int size)
+        {
+            return System.Buffers.ArrayPool<T>.Shared.Rent(size);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Free(ref T[] array)
+        {
+            var exchanged = Interlocked.Exchange(ref array, null);
+
+            if (exchanged == null || exchanged.Length == 0)
+            {
+                return;
+            }
+
+            System.Buffers.ArrayPool<T>.Shared.Return(exchanged);
+        }
+    }
+
     // A 'dumb' placeholder to be later replaced.
     internal class AllocatingArrayPool<T> : IArrayPool<T>
     {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public T[] Get(int size)
         {
             if (size == 0)
@@ -37,6 +60,7 @@ namespace Lennox.AsyncPostgresClient.Pool
             return new T[size];
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Free(ref T[] array)
         {
             var exchanged = Interlocked.Exchange(ref array, null);
@@ -54,7 +78,7 @@ namespace Lennox.AsyncPostgresClient.Pool
 
         public static IArrayPool<T> InstanceDefault()
         {
-            return new AllocatingArrayPool<T>();
+            return new SystemBufferArrayPool<T>();
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -75,6 +99,12 @@ namespace Lennox.AsyncPostgresClient.Pool
     {
         T Get();
         void Free(ref T obj);
+    }
+
+    internal interface IObjectPoolSized<T> : IObjectPool<T>
+        where T : class
+    {
+        T Get(int size);
     }
 
     public struct PoolLease<T> : IDisposable
@@ -126,19 +156,51 @@ namespace Lennox.AsyncPostgresClient.Pool
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static T GetObject() => Default.Get();
+        public static T GetObject()
+        {
+            return Default.Get();
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void FreeObject(ref T obj) => Default.Free(ref obj);
+        public static void FreeObject(ref T obj)
+        {
+            Default.Free(ref obj);
+        }
     }
 
     internal static class MemoryStreamPool
     {
+        private static readonly RecyclableMemoryStreamManager _manager =
+            new RecyclableMemoryStreamManager();
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static MemoryStream Get()
+        {
+            return _manager.GetStream();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static MemoryStream Get(int size)
+        {
+            return _manager.GetStream("", size);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void Free(ref MemoryStream ms)
+        {
+            ms.Dispose();
+        }
+    }
+
+    internal static class AllocatingMemoryStreamPool
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static MemoryStream Get()
         {
             return new MemoryStream();
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void Free(ref MemoryStream ms)
         {
             var exchanged = Interlocked.Exchange(ref ms, null);
@@ -153,22 +215,76 @@ namespace Lennox.AsyncPostgresClient.Pool
         }
     }
 
-    // https://referencesource.microsoft.com/#mscorlib/system/text/stringbuildercache.cs,a6dbe82674916ac0
     internal static class StringBuilderPool
     {
+        public static readonly IObjectPoolSized<StringBuilder> Default =
+            new StringBuilderCachePool();
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static StringBuilder Get()
+        {
+            return Default.Get();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static StringBuilder Get(int capacity)
+        {
+            return Default.Get(capacity);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void Free(ref StringBuilder sb)
+        {
+            Default.Free(ref sb);
+        }
+    }
+
+    internal class StringBuilderCachePool : IObjectPoolSized<StringBuilder>
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public StringBuilder Get()
+        {
+            return StringBuilderCache.Acquire();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public StringBuilder Get(int capacity)
+        {
+            return StringBuilderCache.Acquire(capacity);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Free(ref StringBuilder sb)
+        {
+            var exchanged = Interlocked.Exchange(ref sb, null);
+
+            if (exchanged == null)
+            {
+                return;
+            }
+
+            StringBuilderCache.Release(exchanged);
+        }
+    }
+
+    internal class AllocatingStringBuilderPool : IObjectPoolSized<StringBuilder>
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public StringBuilder Get()
         {
             return new StringBuilder();
         }
 
-        public static StringBuilder Get(int capacity)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public StringBuilder Get(int capacity)
         {
             var sb = new StringBuilder();
             sb.EnsureCapacity(capacity);
             return sb;
         }
 
-        public static void Free(ref StringBuilder sb)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Free(ref StringBuilder sb)
         {
             var exchanged = Interlocked.Exchange(ref sb, null);
 

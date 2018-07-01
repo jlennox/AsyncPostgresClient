@@ -1,0 +1,2 @@
+What third party code could be directly included inside the project was. This
+is to simplify the dependency graph which has many benefits.

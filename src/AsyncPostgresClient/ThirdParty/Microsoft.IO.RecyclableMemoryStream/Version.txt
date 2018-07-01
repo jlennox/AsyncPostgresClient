@@ -1,0 +1,2 @@
+Version 1.2.2
+https://github.com/Microsoft/Microsoft.IO.RecyclableMemoryStream/tree/v1.2.2
