@@ -1,5 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
+using System;
 using System.Runtime.CompilerServices;
 using System.Text;
 using Lennox.AsyncPostgresClient.Diagnostic;
@@ -13,6 +12,12 @@ namespace Lennox.AsyncPostgresClient.BufferAccess
         public static unsafe bool TryAsciiToInt(
             byte[] data, int offset, int length, out int number)
         {
+            if (length == 0)
+            {
+                number = 0;
+                return true;
+            }
+
             fixed (byte* pt = &data[offset])
             {
                 return TryAsciiToInt(pt, length, out number);
@@ -161,6 +166,11 @@ namespace Lennox.AsyncPostgresClient.BufferAccess
         public static unsafe long AsciiToLong(
             byte[] data, int offset, int length)
         {
+            if (length == 0)
+            {
+                return 0;
+            }
+
             if (TryAsciiToInt(data, offset, length, out var number))
             {
                 return number;
@@ -197,16 +207,21 @@ namespace Lennox.AsyncPostgresClient.BufferAccess
             const byte plus = (byte)'+';
             const byte e = (byte)'e';
 
-            var periodPosition = -1;
-            var plusPosition = -1;
-            var plusStart = -1;
-            var hasPlus = false;
-
             if (DebugLogger.Enabled)
             {
                 DebugLogger.Log("AsciiToDecimal {0}",
                     Encoding.ASCII.GetString(data, 0, length));
             }
+
+            if (length == 0)
+            {
+                return 0;
+            }
+
+            var periodPosition = -1;
+            var plusPosition = -1;
+            var plusStart = -1;
+            var hasPlus = false;
 
             fixed (byte* pt = data)
             {

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.CompilerServices;
@@ -1634,7 +1634,7 @@ namespace Lennox.AsyncPostgresClient
             var salt = authenticationMessage.MD5PasswordSalt;
 
             Argument.HasValue(nameof(salt), salt);
-            Argument.IsEqual(nameof(salt), saltLength, salt.Length);
+            Argument.IsAtLeast(nameof(salt), saltLength, salt.Length);
 
             var passwordMessage = new PasswordMessage();
             MD5 md5 = null;
@@ -1740,7 +1740,6 @@ namespace Lennox.AsyncPostgresClient
 
             lengthPos.WriteLength(length);
         }
-
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void WriteMessage(

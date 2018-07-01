@@ -37,7 +37,7 @@ namespace Lennox.AsyncPostgresClient.Tests
                         AOne = 1
                     });
 
-                var results = one.ToArray();
+                var results = one.Select(t => t.AOne).ToArray();
                 CollectionAssert.AreEqual(new[] { 1 }, results);
             }
         }

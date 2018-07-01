@@ -1,6 +1,5 @@
-﻿using System;
-using System.Collections.Generic;
 using System.Text;
+using Lennox.AsyncPostgresClient.Extension;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Lennox.AsyncPostgresClient.Tests.Protocol
@@ -26,11 +25,21 @@ namespace Lennox.AsyncPostgresClient.Tests.Protocol
             var passwordMessage = PasswordMessage
                 .CreateMd5(authMessage, state, connectionString);
 
-            var expectedHash = Encoding.ASCII.GetBytes(
-                "md56727bbde9524c2dc683c7274a7ee24a8");
+            const string expectedHash = "md583ce447ce89d7e4e943205ff8f82f76a";
 
-            Assert.AreEqual(0x23, passwordMessage.PasswordLength);
-            CollectionAssert.AreEqual(expectedHash, passwordMessage.Password);
+            try
+            {
+                var actualHash = Encoding.ASCII.GetString(
+                    passwordMessage.Password, 0,
+                    passwordMessage.PasswordLength);
+                Assert.AreEqual(0x23, passwordMessage.PasswordLength);
+                Assert.AreEqual(expectedHash, actualHash);
+            }
+            finally
+            {
+                authMessage.TryDispose();
+                passwordMessage.TryDispose();
+            }
         }
     }
 }

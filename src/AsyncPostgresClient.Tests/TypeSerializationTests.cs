@@ -1,6 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Lennox.AsyncPostgresClient.Diagnostic;
@@ -236,11 +234,11 @@ namespace Lennox.AsyncPostgresClient.Tests
                 var reader = await command.ExecuteReaderAsync(cancel);
                 Assert.IsTrue(await reader.ReadAsync(cancel));
 
-                var guid = (Guid)reader[0];
+                var array = (int[])reader[0];
 
-                Assert.AreEqual(
-                    Guid.Parse("AC426679-CD6A-4571-A519-C4DD7691C63C"),
-                    guid);
+                CollectionAssert.AreEqual(
+                    new[] { 10000, 10000, 10000, 10000 },
+                    array);
 
                 Assert.IsFalse(await reader.ReadAsync(cancel));
             }

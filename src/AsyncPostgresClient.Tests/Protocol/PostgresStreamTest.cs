@@ -36,7 +36,7 @@ namespace Lennox.AsyncPostgresClient.Tests.Protocol
             using (var authMessage = (AuthenticationMessage)message)
             {
                 Assert.AreEqual(AuthenticationMessageType.Ok, authMessage.AuthenticationMessageType);
-                Assert.AreEqual(0, authMessage.MD5PasswordSalt);
+                Assert.IsNull(authMessage.MD5PasswordSalt);
                 Assert.IsNull(authMessage.GSSAuthenticationData);
             }
         }
@@ -153,8 +153,8 @@ namespace Lennox.AsyncPostgresClient.Tests.Protocol
 
             // If used to generate test code, verify the data against known
             // values from wireshark or the like.
-            var description = string.Join(",\n", dataMessage.Rows.Select(t =>
-                $"new DataRow({t.Length}, new byte[] {{{string.Join(",", t.Data.Select(q => $"0x{q:X2}"))}}})"));
+            //var description = string.Join(",\n", dataMessage.Rows.Select(t =>
+            //    $"new DataRow({t.Length}, new byte[] {{{string.Join(",", t.Data.Select(q => $"0x{q:X2}"))}}})"));
 
             Assert.AreEqual(columnCount, dataMessage.ColumnCount);
             Assert.AreEqual(columnCount, rows.Length);

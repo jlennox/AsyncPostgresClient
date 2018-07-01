@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
@@ -34,6 +34,19 @@ namespace Lennox.AsyncPostgresClient
             {
                 throw new ArgumentOutOfRangeException(name, actual,
                     $"Unexpected value. Expected '{expected}', received '{actual}'");
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void IsAtLeast<T>(string name, T expected, T actual)
+            where T : IComparable<T>
+        {
+            var result = expected.CompareTo(actual);
+
+            if (result > 0)
+            {
+                throw new ArgumentOutOfRangeException(name, actual,
+                    $"Unexpected value. Expected at least '{expected}', received '{actual}' ({result})");
             }
         }
 

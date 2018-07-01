@@ -1,5 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
+using System;
 using System.Text;
 using Lennox.AsyncPostgresClient.PostgresTypes;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
