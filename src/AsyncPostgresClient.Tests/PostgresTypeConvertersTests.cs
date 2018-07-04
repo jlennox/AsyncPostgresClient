@@ -21,7 +21,7 @@ namespace Lennox.AsyncPostgresClient.Tests
                 PostgresFormatCode.Text,
                 PostgresClientState.CreateDefault());
 
-            Assert.IsTrue(actual is T);
+            Assert.IsTrue(actual is T, $"Expected {typeof(T)} but was {actual.GetType()}");
             Assert.AreEqual(expected, actual);
         }
 
@@ -44,8 +44,7 @@ namespace Lennox.AsyncPostgresClient.Tests
             Test("321", PostgresTypeNames.Int4, 321);
             Test("321", PostgresTypeNames.Int8, 321L);
             Test("321", PostgresTypeNames.Float4, (float)321);
-            Test("321", PostgresTypeNames.Float8, (float)321);
-            Test("321", PostgresTypeNames.Money, (decimal)321);
+            Test("321", PostgresTypeNames.Float8, (double)321);
             Test("321", PostgresTypeNames.Text, "321");
             Test(uuid, PostgresTypeNames.Uuid, new Guid(uuid));
         }
