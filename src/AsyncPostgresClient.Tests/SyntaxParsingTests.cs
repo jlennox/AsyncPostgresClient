@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -184,7 +184,11 @@ namespace Lennox.AsyncPostgresClient.Tests
         {
             AssertEscaped(
                 "select @@foobar, @foobar",
-                "select @@foobar, $1");
+                "select @foobar, $1");
+
+            AssertEscaped(
+                "select @@@foobar, @foobar",
+                "select @$1, $1");
         }
 
         [TestMethod]

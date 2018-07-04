@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using Lennox.AsyncPostgresClient.Extension;
 using Lennox.AsyncPostgresClient.Pool;
@@ -29,6 +29,7 @@ namespace Lennox.AsyncPostgresClient
             for (var i = 0; i < sql.Length; ++i)
             {
                 var chr = sqlPtr[i];
+                var nextChr = i == sql.Length - 1 ? '\0' : sqlPtr[i + 1];
 
                 switch (chr)
                 {
@@ -150,8 +151,10 @@ namespace Lennox.AsyncPostgresClient
 
                         continue;
                     // Handle @@NotNamedParameter
-                    case '@' when lastChar == '@':
+                    case '@' when nextChr == '@':
+                        // Append and fast forward past next one.
                         sb.Append(chr);
+                        ++i;
                         lastChar = '\0';
                         continue;
                     // Handle @NamedParameter
